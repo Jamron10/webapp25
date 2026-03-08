@@ -49,20 +49,20 @@
   <div id="app" class="flex flex-col h-screen w-full max-w-md mx-auto relative bg-slate-900 shadow-2xl overflow-hidden transition-all duration-300">
     
     <!-- Top Header -->
-    <header id="app-header" class="flex items-center justify-between p-4 bg-slate-850 border-b border-slate-800 z-10 shrink-0">
-      <div class="flex items-center space-x-3">
-        <div id="user-avatar" class="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-xl overflow-hidden skeleton"></div>
+    <header id="app-header" class="flex items-center justify-between py-2.5 px-4 bg-slate-850 border-b border-slate-800 z-10 shrink-0">
+      <div class="flex items-center space-x-2">
+        <div id="user-avatar" class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] overflow-hidden skeleton"></div>
         <div>
-          <h1 id="user-name" class="font-bold text-sm skeleton w-24 h-4 mb-1 rounded"></h1>
-          <p id="user-id" class="text-xs text-slate-400 skeleton w-16 h-3 rounded"></p>
+          <h1 id="user-name" class="font-bold text-xs skeleton w-20 h-3 mb-0.5 rounded"></h1>
+          <p id="user-id" class="text-[9px] text-slate-400 skeleton w-12 h-2.5 rounded"></p>
         </div>
       </div>
       <div class="flex items-center relative">
         <!-- Hidden admin toggle (tap 5 times to show admin) -->
         <button id="admin-trigger" class="w-12 h-12 absolute -top-2 -right-2 z-50 opacity-0"></button>
         <div class="text-right pointer-events-none">
-          <p class="text-[10px] text-slate-400 uppercase tracking-wide">Заработано</p>
-          <p id="header-balance" class="font-bold text-teal-400 text-sm">0.00 USDT</p>
+          <p class="text-[9px] text-slate-400 uppercase tracking-wide">Заработано</p>
+          <p id="header-balance" class="font-bold text-teal-400 text-xs">0.00 USDT</p>
         </div>
       </div>
     </header>
@@ -71,26 +71,6 @@
     <main id="content-area" class="flex-1 overflow-y-auto pb-20 relative scroll-smooth hide-scrollbar">
       <!-- Content injected by JS -->
     </main>
-
-    <!-- Modal Overlay -->
-    <div id="modal-overlay" class="fixed inset-0 bg-black/80 z-40 hidden flex items-center justify-center backdrop-blur-sm transition-opacity opacity-0">
-      <div id="modal-content" class="bg-slate-850 w-11/12 max-w-sm rounded-3xl border border-slate-700 shadow-2xl transform scale-95 transition-transform p-6 max-h-[90vh] overflow-y-auto hide-scrollbar">
-        <!-- Modal content injected here -->
-      </div>
-    </div>
-
-    <!-- Blocking Screen (TG Only / Banned / Maintenance) -->
-    <div id="block-screen" class="fixed inset-0 bg-slate-900 z-[200] hidden flex-col items-center justify-center text-center p-6 backdrop-blur-md bg-opacity-95">
-      <div id="block-icon" class="text-6xl mb-4 drop-shadow-lg"></div>
-      <h2 id="block-title" class="text-2xl font-bold text-white mb-2"></h2>
-      <p id="block-msg" class="text-slate-400 mb-6 max-w-xs leading-relaxed text-sm"></p>
-      <button id="dev-bypass-btn" class="text-xs text-slate-500 underline px-4 py-2 mt-4 hover:text-white transition-colors hidden">Продолжить для теста (Dev)</button>
-    </div>
-
-    <!-- Toast Notification -->
-    <div id="toast" class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-teal-500 text-white font-bold px-5 py-2.5 rounded-2xl shadow-lg shadow-teal-500/20 z-[110] transition-all opacity-0 pointer-events-none translate-y-[-20px] text-center w-max max-w-[90%] text-sm">
-      Уведомление
-    </div>
 
     <!-- Bottom Navigation -->
     <nav class="absolute bottom-0 animate-slide-up delay-150 w-full bg-slate-850 border-t border-slate-800 flex justify-around items-center pb-safe pt-2 z-20">
@@ -192,6 +172,28 @@
         <span class="text-[9px] font-medium tracking-wide">Настройки</span>
       </button>
     </nav>
+  </div>
+
+  <!-- GLOBAL OVERLAYS (Moved outside #app so they work perfectly in Admin Mode too) -->
+
+  <!-- Modal Overlay -->
+  <div id="modal-overlay" class="fixed inset-0 bg-black/80 z-[150] hidden flex items-center justify-center backdrop-blur-sm transition-opacity opacity-0">
+    <div id="modal-content" class="bg-slate-850 w-11/12 max-w-sm rounded-3xl border border-slate-700 shadow-2xl transform scale-95 transition-transform p-6 max-h-[90vh] overflow-y-auto hide-scrollbar">
+      <!-- Modal content injected here -->
+    </div>
+  </div>
+
+  <!-- Blocking Screen (TG Only / Banned / Maintenance) -->
+  <div id="block-screen" class="fixed inset-0 bg-slate-900 z-[200] hidden flex-col items-center justify-center text-center p-6 backdrop-blur-md bg-opacity-95">
+    <div id="block-icon" class="text-6xl mb-4 drop-shadow-lg"></div>
+    <h2 id="block-title" class="text-2xl font-bold text-white mb-2"></h2>
+    <p id="block-msg" class="text-slate-400 mb-6 max-w-xs leading-relaxed text-sm"></p>
+    <button id="dev-bypass-btn" class="text-xs text-slate-500 underline px-4 py-2 mt-4 hover:text-white transition-colors hidden">Продолжить для теста (Dev)</button>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-teal-500 text-white font-bold px-5 py-2.5 rounded-2xl shadow-lg shadow-teal-500/20 z-[160] transition-all opacity-0 pointer-events-none translate-y-[-20px] text-center w-max max-w-[90%] text-sm">
+    Уведомление
   </div>
 
   <script src="https://miniapps.ai/sdk/miniapps-ai-v1.js"></script>
