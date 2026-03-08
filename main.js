@@ -12,7 +12,7 @@ const ADMIN_ID = 5730406030; // ⚠️ ВПИШИТЕ ВАШ TELEGRAM ID
 // Временно данные сохраняются в localStorage (эмуляция Mongoose).
 // Для реальной работы нужно будет сделать fetch-запросы к Node.js бэкенду (bot.js).
 
-const API_URL = 'https://kjamama.netlify.app/api'; // ⚠️ ЗАМЕНИТЕ НА АДРЕС ВАШЕГО СЕРВЕРА
+const API_URL = 'https://webapp26.onrender.com/api'; // ⚠️ ЗАМЕНИТЕ НА АДРЕС ВАШЕГО СЕРВЕРА
 let isDbActive = true;
 
 const User = {
@@ -2282,3 +2282,4 @@ window.openLeaderboardModal = async () => {
 
 // Start app
 document.addEventListener('DOMContentLoaded', initApp);
+
