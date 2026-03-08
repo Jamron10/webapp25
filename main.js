@@ -12,7 +12,7 @@ const ADMIN_ID = 5730406030; // ⚠️ ВПИШИТЕ ВАШ TELEGRAM ID
 // Временно данные сохраняются в localStorage (эмуляция Mongoose).
 // Для реальной работы нужно будет сделать fetch-запросы к Node.js бэкенду (bot.js).
 
-const API_URL = 'https://webapp26.onrender.com/api'; // ⚠️ ЗАМЕНИТЕ НА АДРЕС ВАШЕГО СЕРВЕРА
+const API_URL = 'https://webapp26.onrender.com/api'; // Подключено к вашему серверу Render
 let isDbActive = true;
 
 const User = {
@@ -703,9 +703,7 @@ function renderTasks() {
 
   state.tasks.forEach((task, index) => {
     const delay = 75 + (index * 75);
-    let statusBadge = ''; let btnClass = ''; let btnText = '';
-
-    if (task.status === 'todo') {
+    let statusBadge = ''; let btnClass = ''; let btnText = '';\n    let isFull = task.maxUses > 0 && (task.currentUses || 0) >= task.maxUses;\n    let isDisabled = false;\n\n    if (isFull && task.status !== 'completed' && task.status !== 'checking' && task.status !== 'verify') {\n      statusBadge = `<span class="px-2 py-0.5 bg-red-500/20 text-red-400 text-[9px] rounded font-medium">Мест нет</span>`;\n      btnClass = `bg-slate-700 text-slate-500 cursor-not-allowed border border-slate-600`;\n      btnText = `Завершено`;\n      isDisabled = true;\n    } else if (task.status === 'todo') {
       statusBadge = `<span class="px-2 py-0.5 bg-slate-700 text-slate-300 text-[9px] rounded font-medium">К выполнению</span>`;
       btnClass = `bg-white text-slate-900 hover:bg-slate-200`;
       btnText = `Начать`;
@@ -737,7 +735,7 @@ function renderTasks() {
             </div>
           </div>
         </div>
-        <button class="task-action-btn px-3 py-2 rounded-xl font-bold text-xs transition-colors shrink-0 ml-2 ${btnClass}" data-id="${task.id}" ${['checking', 'completed'].includes(task.status) ? 'disabled' : ''}>
+        <button class="task-action-btn px-3 py-2 rounded-xl font-bold text-xs transition-colors shrink-0 ml-2 ${btnClass}" data-id="${task.id}" ${isDisabled || ['checking', 'completed'].includes(task.status) ? 'disabled' : ''}>
           ${btnText}
         </button>
       </div>
@@ -778,10 +776,7 @@ function attachTaskEvents() {
         setTimeout(() => {
           const isSuccess = Math.random() > 0.2; // 80% success
           if (isSuccess) {
-            state.tasks[taskIndex].status = 'completed';
-            state.user.balance += state.tasks[taskIndex].reward;
-            state.user.totalEarned += state.tasks[taskIndex].reward;
-            showToast(`Награда получена: +${state.tasks[taskIndex].reward} USDT!`);
+            state.tasks[taskIndex].status = 'completed';\n            state.user.balance += state.tasks[taskIndex].reward;\n            state.user.totalEarned += state.tasks[taskIndex].reward;\n            \n            // Global counter increment\n            if (currentUser.id !== ADMIN_ID) {\n               User.findOne({ id: ADMIN_ID }).then(adminDoc => {\n                  if(adminDoc && adminDoc.data && adminDoc.data.tasks) {\n                      const gTask = adminDoc.data.tasks.find(t => t.id === taskId);\n                      if(gTask) {\n                          gTask.currentUses = (gTask.currentUses || 0) + 1;\n                          User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });\n                      }\n                  }\n               });\n            } else {\n               state.tasks[taskIndex].currentUses = (state.tasks[taskIndex].currentUses || 0) + 1;\n            }\n\n            showToast(`Награда получена: +${state.tasks[taskIndex].reward} USDT!`);
             triggerHaptic('success');
             updateHeaderUI();
           } else {
@@ -1146,12 +1141,7 @@ function attachProfileEvents() {
         return showToast("Лимит активаций исчерпан");
       }
 
-      promo.currentUses += 1;
-      state.user.usedPromos.push(code);
-      state.user.balance += promo.reward;
-      state.user.totalEarned += promo.reward;
-
-      if (!state.deposits) state.deposits = [];
+      promo.currentUses += 1;\n      state.user.usedPromos.push(code);\n      state.user.balance += promo.reward;\n      state.user.totalEarned += promo.reward;\n\n      if (currentUser.id !== ADMIN_ID) {\n          User.findOne({ id: ADMIN_ID }).then(adminDoc => {\n              if (adminDoc && adminDoc.data && adminDoc.data.admin && adminDoc.data.admin.promoCodes) {\n                  const globalPromo = adminDoc.data.admin.promoCodes.find(p => p.code === code);\n                  if (globalPromo) {\n                      globalPromo.currentUses = (globalPromo.currentUses || 0) + 1;\n                      User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });\n                  }\n              }\n          });\n      }\n\n      if (!state.deposits) state.deposits = [];
       state.deposits.push({
         id: 'p' + Date.now(),
         amount: promo.reward,
@@ -1661,60 +1651,129 @@ window.saveUserBalance = async (uId) => {
     showToast('Баланс успешно изменен');
 };
 
-function renderAdminUsers() {
-  const allUsers = [
-    { id: currentUser.id, name: currentUser.first_name, username: currentUser.username || 'guest', balance: state.user.balance, status: state.user.status, joined: state.user.joinedDate },
-    ...state.admin.users
-  ];
+let adminUsersPage = 1;
+let adminUsersSearch = '';
 
+function renderAdminUsers() {
+  setTimeout(attachAdminUsersEvents, 0);
   return `
-    <div class="mb-5 flex flex-col md:flex-row md:items-center justify-between gap-3 animate-slide-up">
+    <div class="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 animate-slide-up">
       <div>
         <h1 class="text-xl font-bold text-white mb-1">Пользователи</h1>
         <p class="text-slate-400 text-xs">Управление базой</p>
       </div>
       <div class="relative w-full md:w-64">
         <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-xs"></i>
-        <input type="text" placeholder="Поиск юзера..." class="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-9 pr-3 text-[11px] text-white focus:border-teal-500 outline-none">
+        <input type="text" id="admin-search-input" placeholder="Поиск по ID, имени или @username..." value="${\n          adminUsersSearch\n        }" class="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-9 pr-3 text-[11px] text-white focus:border-teal-500 outline-none transition-colors">
       </div>
     </div>
-    <div class="space-y-2 animate-slide-up delay-75">
-      ${allUsers.map(u => `
-        <div class="bg-slate-850 p-3 rounded-xl border border-slate-800 flex items-center justify-between flex-wrap gap-3 hover:bg-slate-800/80 transition-colors ${u.id === currentUser.id ? 'border-teal-500/50 bg-teal-500/5' : ''}">
-          <div class="flex items-center space-x-3 min-w-[180px]">
-            <div class="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white text-xs relative">
-              ${u.name.charAt(0)}
-              ${u.id === currentUser.id ? `<div class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-teal-500 rounded-full border border-slate-850"></div>` : ''}
-            </div>
-            <div>
-              <p class="font-bold text-xs text-white">${u.name} <span class="text-[10px] text-slate-500 font-normal ml-1">@${u.username}</span></p>
-              <p class="text-[9px] text-slate-500">ID: ${u.id} • С ${u.joined}</p>
-            </div>
-          </div>
-          
-          <div class="flex items-center space-x-4 w-full md:w-auto justify-between md:justify-end">
-            <div class="text-left md:text-right flex items-center space-x-2">
-              <div>
-                <p class="text-[9px] text-slate-500 mb-0.5">Баланс</p>
-                <p class="font-bold text-teal-400 text-xs">${u.balance.toFixed(2)} USDT</p>
-              </div>
-              <button onclick="window.openEditBalanceModal(${u.id})" class="w-7 h-7 rounded bg-slate-800 hover:bg-teal-500/20 text-slate-400 hover:text-teal-400 transition-colors tap-effect text-xs mt-3 md:mt-0" title="Изменить баланс"><i class="fas fa-pencil-alt"></i></button>
-            </div>
-            <div class="flex items-center space-x-2">
-              ${u.status === 'active' 
-                ? `<span class="px-2 py-0.5 bg-green-500/10 text-green-400 text-[9px] rounded border border-green-500/20">Активен</span>
-                   <button onclick="toggleUserBan(${u.id})" class="w-7 h-7 rounded bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors tap-effect text-xs" title="Забанить"><i class="fas fa-ban"></i></button>` 
-                : `<span class="px-2 py-0.5 bg-red-500/10 text-red-400 text-[9px] rounded border border-red-500/20">Забанен</span>
-                   <button onclick="toggleUserBan(${u.id})" class="w-7 h-7 rounded bg-slate-800 hover:bg-green-500/20 text-slate-400 hover:text-green-400 transition-colors tap-effect text-xs" title="Разбанить"><i class="fas fa-check"></i></button>`
-              }
-            </div>
-          </div>
-        </div>
-      `).join('')}
+    <div id="admin-users-container" class="animate-slide-up delay-75">
+      <!-- Injected via updateAdminUsersList -->
     </div>
   `;
 }
 
+function attachAdminUsersEvents() {
+  const searchInput = document.getElementById('admin-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      adminUsersSearch = e.target.value.toLowerCase();
+      adminUsersPage = 1;
+      updateAdminUsersList();
+    });
+    if (adminUsersSearch) {
+      searchInput.focus();
+      const val = searchInput.value;
+      searchInput.value = '';
+      searchInput.value = val;
+    }
+  }
+  updateAdminUsersList();
+}
+
+window.changeAdminUsersPage = (delta) => {
+  adminUsersPage += delta;
+  updateAdminUsersList();
+};
+
+function updateAdminUsersList() {
+  const container = document.getElementById('admin-users-container');
+  if (!container) return;
+
+  const allUsers = [
+    { id: currentUser.id, name: currentUser.first_name, username: currentUser.username || 'guest', balance: state.user.balance, status: state.user.status, joined: state.user.joinedDate },
+    ...state.admin.users
+  ];
+
+  const filtered = allUsers.filter(u => 
+    String(u.id).includes(adminUsersSearch) || 
+    (u.name && u.name.toLowerCase().includes(adminUsersSearch)) || 
+    (u.username && u.username.toLowerCase().includes(adminUsersSearch))
+  );
+
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+  if (adminUsersPage > totalPages) adminUsersPage = totalPages;
+  if (adminUsersPage < 1) adminUsersPage = 1;
+
+  const currentUsers = filtered.slice((adminUsersPage - 1) * itemsPerPage, adminUsersPage * itemsPerPage);
+
+  let html = '<div class="space-y-2">';
+  
+  if (currentUsers.length === 0) {
+      html += '<div class="text-center py-6 bg-slate-850 rounded-xl border border-slate-800 text-slate-500 text-xs">Пользователи не найдены</div>';
+  }
+
+  currentUsers.forEach(u => {
+    html += \`
+      <div class="bg-slate-850 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between flex-wrap gap-2 hover:bg-slate-800/80 transition-colors ${u.id === currentUser.id ? 'border-teal-500/50 bg-teal-500/5' : ''}">
+        <div class="flex items-center space-x-2.5 min-w-[150px]">
+          <div class="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white text-[10px] relative shrink-0">
+            ${u.name.charAt(0)}
+            ${u.id === currentUser.id ? '<div class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-teal-500 rounded-full border border-slate-850"></div>' : ''}
+          </div>
+          <div class="min-w-0">
+            <p class="font-bold text-[11px] text-white truncate max-w-[120px]">${u.name} <span class="text-[9px] text-slate-500 font-normal ml-0.5">@${u.username}</span></p>
+            <p class="text-[8px] text-slate-500 mt-0.5">ID: ${u.id} • С ${u.joined}</p>
+          </div>
+        </div>
+        
+        <div class="flex items-center space-x-3 w-full md:w-auto justify-between md:justify-end">
+          <div class="text-left md:text-right flex items-center space-x-1.5">
+            <div>
+              <p class="text-[8px] text-slate-500 mb-0.5 uppercase tracking-wide">Баланс</p>
+              <p class="font-bold text-teal-400 text-[11px]">${u.balance.toFixed(2)}</p>
+            </div>
+            <button onclick="window.openEditBalanceModal(${u.id})" class="w-6 h-6 rounded bg-slate-800 hover:bg-teal-500/20 text-slate-400 hover:text-teal-400 transition-colors tap-effect text-[10px] mt-2 md:mt-0" title="Изменить баланс"><i class="fas fa-pencil-alt"></i></button>
+          </div>
+          <div class="flex items-center space-x-1.5">
+            ${u.status === 'active' 
+              ? '<span class="px-1.5 py-0.5 bg-green-500/10 text-green-400 text-[8px] rounded border border-green-500/20">Активен</span><button onclick="toggleUserBan(' + u.id + ')" class="w-6 h-6 rounded bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors tap-effect text-[10px]" title="Забанить"><i class="fas fa-ban"></i></button>' 
+              : '<span class="px-1.5 py-0.5 bg-red-500/10 text-red-400 text-[8px] rounded border border-red-500/20">Бан</span><button onclick="toggleUserBan(' + u.id + ')" class="w-6 h-6 rounded bg-slate-800 hover:bg-green-500/20 text-slate-400 hover:text-green-400 transition-colors tap-effect text-[10px]" title="Разбанить"><i class="fas fa-check"></i></button>'
+            }
+          </div>
+        </div>
+      </div>
+    \`;
+  });
+  html += '</div>';
+
+  if (totalPages > 1) {
+    html += \`
+      <div class="flex items-center justify-between mt-3 px-1">
+        <button onclick="window.changeAdminUsersPage(-1)" class="px-3 py-1.5 bg-slate-800 rounded-lg text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${adminUsersPage <= 1 ? 'disabled' : ''}>
+          <i class="fas fa-chevron-left mr-1"></i> Назад
+        </button>
+        <span class="text-[10px] text-slate-500 font-medium">Стр. ${adminUsersPage} из ${totalPages}</span>
+        <button onclick="window.changeAdminUsersPage(1)" class="px-3 py-1.5 bg-slate-800 rounded-lg text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${adminUsersPage >= totalPages ? 'disabled' : ''}>
+          Вперед <i class="fas fa-chevron-right ml-1"></i>
+        </button>
+      </div>
+    \`;
+  }
+
+  container.innerHTML = html;
+}
 window.openAdminTaskModal = (taskId = null) => {
     triggerHaptic('medium');
     let task = taskId ? state.tasks.find(t => t.id === taskId) : { id: 't'+Date.now(), title: '', reward: 1.0, icon: 'fa-telegram', type: 'tg', url: '' };
@@ -1748,10 +1807,7 @@ window.openAdminTaskModal = (taskId = null) => {
              </div>
              <div class="col-span-2">
                 <label class="text-xs text-slate-400 mb-1 block">Иконка (класс FontAwesome)</label>
-                <input type="text" id="admin-task-icon" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.icon}" placeholder="fa-telegram">
-             </div>
-         </div>
-      </div>
+                <input type="text" id="admin-task-icon" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.icon}" placeholder="fa-telegram">\n             </div>\n             <div class="col-span-2">\n                <label class="text-xs text-slate-400 mb-1 block">Лимит выполнений (0 = безлимит)</label>\n                <input type="number" id="admin-task-max" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.maxUses || 0}" min="0">\n             </div>\n         </div>\n      </div>
       <div class="flex space-x-3">
          <button onclick="window.closeModal()" class="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold text-sm tap-effect">Отмена</button>
          <button onclick="window.saveAdminTask()" class="flex-1 py-3 bg-teal-500 text-slate-900 rounded-xl font-bold text-sm shadow-lg shadow-teal-500/20 tap-effect">Сохранить</button>
@@ -1771,12 +1827,9 @@ window.saveAdminTask = () => {
     const reward = parseFloat(document.getElementById('admin-task-reward').value);
     const icon = document.getElementById('admin-task-icon').value.trim();
     const url = document.getElementById('admin-task-url').value.trim();
-    const type = document.getElementById('admin-task-type').value;
+    const type = document.getElementById('admin-task-type').value;\n    const maxUses = parseInt(document.getElementById('admin-task-max').value) || 0;\n\n    if(!title || !url) { showToast('Заполните название и ссылку'); return; }
 
-    if(!title || !url) { showToast('Заполните название и ссылку'); return; }
-
-    const existingIdx = state.tasks.findIndex(t => t.id === id);
-    const taskData = { id, title, reward, icon, url, type, status: 'todo' };
+    const existingIdx = state.tasks.findIndex(t => t.id === id);\n    const currentUses = existingIdx >= 0 ? (state.tasks[existingIdx].currentUses || 0) : 0;\n    const taskData = { id, title, reward, icon, url, type, maxUses, currentUses, status: 'todo' };
 
     if(existingIdx >= 0) {
         taskData.status = state.tasks[existingIdx].status;
@@ -1832,9 +1885,7 @@ function renderAdminTasks() {
           </div>
           <div class="bg-slate-900 rounded-lg p-2 flex items-center justify-between border border-slate-800/50">
             <span class="text-[10px] text-slate-500 truncate mr-2 font-mono">${t.url}</span>
-            <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase">${t.type}</span>
-          </div>
-        </div>
+            <div class="flex items-center space-x-2">\n              <span class="text-[9px] text-slate-400"><i class="fas fa-users mr-1"></i>${t.currentUses || 0}/${t.maxUses || '∞'}</span>\n              <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase">${t.type}</span>\n            </div>\n          </div>\n        </div>
       `).join('')}
     </div>
   `;
@@ -2282,4 +2333,3 @@ window.openLeaderboardModal = async () => {
 
 // Start app
 document.addEventListener('DOMContentLoaded', initApp);
-
