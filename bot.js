@@ -35,10 +35,7 @@ const app = express();
 app.use(cors()); // Разрешаем CORS для запросов из Web App
 app.use(express.json({ limit: '50mb' })); // Увеличиваем лимит для больших объектов состояния
 
-// Проверка работоспособности сервера (для Render и браузера)
-app.get('/', (req, res) => {
-  res.send('✅ API Сервер TetherFlow успешно работает!');
-});
+const path = require('path');\n\n// Раздаем файлы визуального интерфейса (Фронтенд)\napp.get('/', (req, res) => {\n  res.sendFile(path.join(__dirname, 'index.html'));\n});\napp.get('/main.js', (req, res) => {\n  res.sendFile(path.join(__dirname, 'main.js'));\n});\napp.get('/styles.css', (req, res) => {\n  res.sendFile(path.join(__dirname, 'styles.css'));\n});
 
 // Получить одного пользователя
 app.get('/api/users/:id', async (req, res) => {
