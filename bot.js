@@ -35,7 +35,14 @@ const app = express();
 app.use(cors()); // Разрешаем CORS для запросов из Web App
 app.use(express.json({ limit: '50mb' })); // Увеличиваем лимит для больших объектов состояния
 
-const path = require('path');\n\n// Раздаем файлы визуального интерфейса (Фронтенд)\napp.get('/', (req, res) => {\n  res.sendFile(path.join(__dirname, 'index.html'));\n});\napp.get('/main.js', (req, res) => {\n  res.sendFile(path.join(__dirname, 'main.js'));\n});\napp.get('/styles.css', (req, res) => {\n  res.sendFile(path.join(__dirname, 'styles.css'));\n});
+const path = require('path');
+// Раздаем файлы визуального интерфейса (Фронтенд)\n
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));\n});
+app.get('/main.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'main.js'));\n});
+app.get('/styles.css', (req, res) => {
+  res.sendFile(path.join(__dirname, 'styles.css'));\n});
 
 // Получить одного пользователя
 app.get('/api/users/:id', async (req, res) => {
@@ -146,3 +153,4 @@ bot.launch().then(() => {
 // Плавная остановка
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
