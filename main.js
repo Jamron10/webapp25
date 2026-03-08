@@ -84,6 +84,7 @@ let state = {
     refBonusPercent: 10,
     refBonusFixed: 0.1,  // Фиксированный бонус за регистрацию реферала
     miningRatePerHour: 0.01, // Базовая добыча в час (для 1 уровня)
+    maxMiningTimeHours: 24, // Лимит времени майнинга (часов)
     upgradeBaseCost: 5,  // Базовая цена апгрейда
     maintenanceMode: false,
     tonWallet: 'EQAdminWalletTonkeeper123...' // Кошелек админа для Tonkeeper
@@ -130,6 +131,22 @@ const modalOverlay = document.getElementById('modal-overlay');
 const modalContent = document.getElementById('modal-content');
 const toast = document.getElementById('toast');
 const globalHeader = document.getElementById('app-header');
+
+// ==========================================
+// CACHE & DOM FIX (MODALS OVERLAY)
+// ==========================================
+function fixOverlaysHierarchy() {
+    const mo = document.getElementById('modal-overlay');
+    const to = document.getElementById('toast');
+    const bs = document.getElementById('block-screen');
+    if (mo && mo.parentElement !== document.body) document.body.appendChild(mo);
+    if (to && to.parentElement !== document.body) document.body.appendChild(to);
+    if (bs && bs.parentElement !== document.body) document.body.appendChild(bs);
+    if (mo) mo.style.zIndex = '99999';
+    if (to) to.style.zIndex = '999999';
+    if (bs) bs.style.zIndex = '9999999';
+}
+fixOverlaysHierarchy();
 
 // ==========================================
 // INITIALIZATION & DATABASE SYNC
@@ -345,10 +362,15 @@ function calculateOfflineMining() {
     const elapsedHours = elapsedMs / (1000 * 60 * 60);
     
     const ratePerHour = (state.settings.miningRatePerHour !== undefined ? state.settings.miningRatePerHour : 0.01) * state.user.level;
-    const mined = elapsedHours * ratePerHour;
+    const maxHours = state.settings.maxMiningTimeHours !== undefined ? state.settings.maxMiningTimeHours : 24;
+    const maxCapacity = ratePerHour * maxHours;
     
+    const mined = elapsedHours * ratePerHour;
     if (mined > 0) {
         state.user.uncollected += mined;
+    }
+    if (state.user.uncollected > maxCapacity) {
+        state.user.uncollected = maxCapacity;
     }
     state.user.lastSync = now;
 }
@@ -362,14 +384,34 @@ function startMiningLoop() {
     const ratePerHour = (state.settings.miningRatePerHour !== undefined ? state.settings.miningRatePerHour : 0.01) * state.user.level;
     const ratePerMs = ratePerHour / (1000 * 60 * 60);
     
+    const maxHours = state.settings.maxMiningTimeHours !== undefined ? state.settings.maxMiningTimeHours : 24;
+    const maxCapacity = ratePerHour * maxHours;
+    
     state.user.uncollected = (state.user.uncollected || 0) + (elapsedMs * ratePerMs);
+    let isFull = false;
+    if (state.user.uncollected >= maxCapacity) {
+        state.user.uncollected = maxCapacity;
+        isFull = true;
+    }
     state.user.lastSync = now;
     
     // Update UI if on home tab
     if (currentTab === 'home') {
        const uncolEl = document.getElementById('uncollected-balance');
+       const statusEl = document.getElementById('mining-status-text');
        if (uncolEl) {
          uncolEl.textContent = state.user.uncollected.toFixed(6);
+         if (statusEl) {
+             if (isFull) {
+                 statusEl.innerHTML = '<span class="text-red-400 animate-pulse"><i class="fas fa-exclamation-triangle"></i> Хранилище заполнено</span>';
+                 uncolEl.classList.remove('from-white', 'to-teal-200');
+                 uncolEl.classList.add('from-red-100', 'to-red-500');
+             } else {
+                 statusEl.innerHTML = 'Намайнено';
+                 uncolEl.classList.remove('from-red-100', 'to-red-500');
+                 uncolEl.classList.add('from-white', 'to-teal-200');
+             }
+         }
        }
     }
   }, 1000);
@@ -391,14 +433,14 @@ function getUpgradeCost(currentLevel) {
 // ==========================================
 function updateHeaderUI() {
   document.getElementById('user-name').className = "font-bold text-xs mb-0.5";
-  document.getElementById('user-id').className = "text-[10px] text-slate-400";
+  document.getElementById('user-id').className = "text-[9px] text-slate-400 leading-none";
   
   document.getElementById('user-name').textContent = `${currentUser.first_name} ${currentUser.last_name || ''}`.trim();
   document.getElementById('user-id').textContent = `@${currentUser.username || currentUser.id}`;
   
   const initials = currentUser.first_name.charAt(0) + (currentUser.last_name ? currentUser.last_name.charAt(0) : '');
   const avatarEl = document.getElementById('user-avatar');
-  avatarEl.className = "admin-trigger-zone w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold text-sm border border-slate-700 shadow-sm cursor-pointer relative z-50 overflow-hidden";
+  avatarEl.className = "admin-trigger-zone w-6 h-6 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold text-[10px] border border-slate-700 shadow-sm cursor-pointer relative z-50 overflow-hidden";
   if (currentUser.photo_url) {
     avatarEl.innerHTML = `<img src="${currentUser.photo_url}" class="w-full h-full object-cover" alt="Avatar">`;
   } else {
@@ -541,63 +583,92 @@ function renderHome() {
   const hashrate = state.user.level * 100;
 
   return `
-    <div class="flex flex-col h-full pt-4 pb-4 px-5 relative bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-800 via-slate-900 to-slate-900 overflow-y-auto hide-scrollbar">
+    <div class="flex flex-col h-full pt-4 pb-4 px-5 relative bg-[#0a0a0f] overflow-y-auto hide-scrollbar z-0">
       
+      <!-- Ambient Background Glows -->
+      <div class="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
+         <div class="absolute -top-[10%] -left-[10%] w-[60%] h-[40%] bg-teal-500/10 rounded-full blur-[80px] animate-pulse"></div>
+         <div class="absolute top-[40%] -right-[20%] w-[60%] h-[40%] bg-blue-600/10 rounded-full blur-[100px]"></div>
+      </div>
+
       <!-- Profile widget top-left -->
-      <div class="admin-trigger-zone animate-slide-up flex items-center space-x-3 mb-4 shrink-0 bg-slate-800/60 p-1 pr-3 rounded-full backdrop-blur-md border border-slate-700/50 w-max shadow-lg cursor-pointer hover:bg-slate-700/60 transition-colors">
-        <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold shadow-inner border border-slate-700/80 text-sm overflow-hidden">
+      <div class="admin-trigger-zone animate-slide-up flex items-center space-x-2 mb-4 shrink-0 bg-slate-800/40 p-1.5 pr-3 rounded-full backdrop-blur-md border border-slate-700/50 w-max shadow-lg cursor-pointer hover:bg-slate-700/60 transition-colors">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold shadow-inner border border-slate-600 text-[10px] overflow-hidden">
           ${avatar}
         </div>
         <div class="flex flex-col">
           <span class="text-white font-bold text-xs leading-tight tracking-wide">${currentUser.first_name}</span>
-          <span class="text-teal-400 text-[10px] font-semibold leading-tight">Баланс: <span id="main-balance">${state.user.balance.toFixed(2)}</span> 
+          <span class="text-teal-400 text-[10px] font-semibold leading-tight">Баланс: <span id="main-balance">${state.user.balance.toFixed(2)}</span></span> 
         </div>
       </div>
 
-      <!-- Cloud Miner Visual -->
-      <div class="flex-1 flex flex-col items-center justify-center relative w-full min-h-[220px] animate-slide-up delay-75 shrink-0 my-2">
-        <div class="float-anim relative w-full flex items-center justify-center">
-          <div class="absolute inset-0 bg-teal-400/10 rounded-full blur-3xl animate-pulse scale-150 pointer-events-none"></div>
+      <!-- NEW Dynamic Cloud Miner Visual -->
+      <div class="flex-1 flex flex-col items-center justify-center relative w-full min-h-[260px] animate-slide-up delay-75 shrink-0 my-2">
+        <div class="relative w-full flex items-center justify-center float-anim">
           
-          <div class="relative z-10 w-56 h-56 rounded-full bg-gradient-to-br from-slate-800 to-slate-900 border-[6px] border-slate-700 shadow-[0_0_40px_rgba(168,85,247,0.15)] flex flex-col items-center justify-center overflow-hidden">
-            <div class="absolute inset-0 flex items-center justify-center opacity-10">
-              <i class="fas fa-fan text-[12rem] text-teal-400 animate-spin-slow"></i>
-            </div>
-            <div class="absolute inset-2 rounded-full border border-teal-500/30"></div>
+          <!-- Outer Tech Ring -->
+          <div class="absolute w-64 h-64 rounded-full border border-dashed border-slate-600/40 pointer-events-none" style="animation: spin-slow 25s linear infinite;"></div>
+          
+          <!-- Middle Accent Ring -->
+          <div class="absolute w-56 h-56 rounded-full border border-teal-500/20 border-t-teal-400 pointer-events-none shadow-[0_0_15px_rgba(45,212,191,0.1)]" style="animation: spin-slow 15s linear infinite reverse;"></div>
+          
+          <!-- Core Miner Container -->
+          <div class="relative z-10 w-48 h-48 rounded-full bg-gradient-to-b from-slate-800 to-slate-900 border-[4px] border-slate-700 shadow-[0_0_50px_rgba(20,184,166,0.15),inset_0_0_20px_rgba(0,0,0,0.8)] flex flex-col items-center justify-center overflow-hidden group">
             
-            <div class="relative z-20 flex flex-col items-center px-4 text-center">
-              <p class="text-slate-400 text-[9px] uppercase tracking-widest mb-1 font-bold">Намайнено</p>
-              <span class="text-2xl font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-400 tracking-tight drop-shadow-sm transition-all" id="uncollected-balance">${state.user.uncollected.toFixed(6)}</span>
-              <span class="text-[10px] text-teal-400 font-bold mt-1 neon-text">USDT</span>
+            <!-- Inner Animated Core -->
+            <div class="absolute inset-0 flex items-center justify-center opacity-30">
+              <i class="fas fa-dharmachakra text-[10rem] text-teal-400" style="animation: spin-slow 10s linear infinite;"></i>
+            </div>
+            
+            <!-- Gradient Overlay -->
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/60 to-transparent opacity-90"></div>
+            
+            <!-- Text Content -->
+            <div class="relative z-20 flex flex-col items-center px-2 text-center mt-2">
+              <div class="w-8 h-8 rounded-full bg-teal-500/20 border border-teal-500/40 flex items-center justify-center mb-1 shadow-[0_0_10px_rgba(20,184,166,0.5)]">
+                <i class="fas fa-bolt text-teal-400 text-sm animate-pulse"></i>
+              </div>
+              <p id="mining-status-text" class="text-slate-400 text-[9px] uppercase tracking-widest mb-0.5 font-bold transition-colors">Намайнено</p>
+              <span class="text-3xl font-mono font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-teal-200 tracking-tight drop-shadow-lg transition-all" id="uncollected-balance">${state.user.uncollected.toFixed(6)}</span>
+              <span class="text-[10px] text-teal-400 font-bold mt-1 uppercase tracking-wider bg-teal-500/10 px-2 py-0.5 rounded-full border border-teal-500/20 shadow-inner">USDT</span>
+              <div class="text-[8px] text-slate-500 mt-2 font-mono bg-slate-900/50 px-2 py-0.5 rounded border border-slate-800">Максимум: <span id="max-capacity-display">${(ratePerHour * (state.settings.maxMiningTimeHours !== undefined ? state.settings.maxMiningTimeHours : 24)).toFixed(4)}</span></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Collect Button -->
-      <div class="animate-slide-up delay-150 w-full mb-4 shrink-0 mt-2">
-        <button id="collect-btn" class="w-full py-3.5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-2xl font-black text-base shadow-[0_0_20px_rgba(168,85,247,0.3)] tap-effect uppercase tracking-wider relative overflow-hidden group">
-          <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1s_infinite]"></div>
-          Собрать прибыль
+      <!-- Collect Button (More engaging) -->
+      <div class="animate-slide-up delay-150 w-full mb-5 shrink-0 mt-4 relative z-10">
+        <button id="collect-btn" class="w-full py-4 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white rounded-2xl font-black text-base shadow-[0_10px_25px_rgba(20,184,166,0.25)] tap-effect uppercase tracking-wider relative overflow-hidden group border border-teal-400/50">
+          <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
+          <span class="relative z-10 flex items-center justify-center drop-shadow-md">
+            <i class="fas fa-hand-holding-usd mr-2 text-lg"></i> Собрать прибыль
+          </span>
         </button>
       </div>
 
-      <!-- Miner Stats & Upgrade Panel -->
-      <div class="w-full mt-auto bg-slate-800/80 p-4 rounded-3xl border border-slate-700/50 backdrop-blur-md shadow-lg animate-slide-up delay-225 shrink-0">
-        <div class="flex justify-between items-center mb-3">
-          <div>
-            <p class="text-white font-bold text-xs flex items-center"><i class="fas fa-server text-teal-400 mr-2 drop-shadow-md"></i> ${hashrate} GH/s</p>
-            <p class="text-slate-400 text-[9px] uppercase mt-1 tracking-wider">Уровень ${state.user.level} / 10</p>
+      <!-- Miner Stats & Upgrade Panel (Glassmorphism) -->
+      <div class="w-full mt-auto bg-slate-800/40 p-4 rounded-3xl border border-slate-600/30 backdrop-blur-xl shadow-2xl animate-slide-up delay-225 shrink-0 relative z-10">
+        <div class="flex justify-between items-center mb-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-slate-900/80 border border-slate-700/50 flex items-center justify-center text-teal-400 shadow-inner">
+              <i class="fas fa-server text-lg"></i>
+            </div>
+            <div>
+              <p class="text-white font-black text-sm drop-shadow-sm">${hashrate} GH/s</p>
+              <p class="text-slate-400 text-[10px] uppercase mt-0.5 tracking-wider font-semibold">Уровень ${state.user.level} / 10</p>
+            </div>
           </div>
-          <div class="text-right">
-            <p class="text-teal-400 font-black text-xs drop-shadow-sm">+${ratePerHour.toFixed(3)} $ / ч</p>
+          <div class="text-right bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-700/50">
+            <p class="text-teal-400 font-black text-xs drop-shadow-sm">+${ratePerHour.toFixed(3)}</p>
+            <p class="text-slate-500 text-[8px] uppercase tracking-widest font-bold mt-0.5">USDT / ч</p>
           </div>
         </div>
         
-        <button id="upgrade-btn" class="w-full py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold text-xs transition-colors tap-effect flex justify-center items-center border border-slate-600 shadow-inner disabled:opacity-50 disabled:cursor-not-allowed group" ${state.user.level >= 10 ? 'disabled' : ''}>
+        <button id="upgrade-btn" class="w-full py-3 bg-slate-900/80 hover:bg-slate-800 text-white rounded-xl font-bold text-xs transition-colors tap-effect flex justify-center items-center border border-slate-600/50 shadow-inner disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden" ${state.user.level >= 10 ? 'disabled' : ''}>
           ${state.user.level >= 10 
             ? '<span><i class="fas fa-star text-yellow-400 mr-1 group-hover:scale-110 transition-transform"></i> Макс. мощность</span>' 
-            : `<span>Улучшить оборудование</span> <span class="bg-slate-900 px-2 py-1 rounded-lg text-teal-400 text-[10px] ml-2 border border-slate-800 shadow-sm group-hover:text-white transition-colors">${getUpgradeCost(state.user.level)} USDT</span>`}
+            : `<span class="relative z-10 flex items-center"><i class="fas fa-arrow-up text-teal-400 mr-1.5"></i> Улучшить оборудование</span> <span class="relative z-10 bg-teal-500/20 px-2 py-1 rounded-md text-teal-300 text-[10px] ml-2 border border-teal-500/30 shadow-sm group-hover:bg-teal-500/30 transition-colors">${getUpgradeCost(state.user.level)} USDT</span>`}
         </button>
       </div>
     </div>
@@ -690,59 +761,95 @@ function attachHomeEvents() {
 
 function renderTasks() {
   let html = `
-    <div class="mb-6 px-4 pt-4 animate-slide-up">
-      <h2 class="text-xl font-bold text-white mb-1">Заработать больше</h2>
-      <p class="text-slate-400 text-xs">Выполняйте задания для получения USDT.</p>
-    </div>
-    <div class="space-y-3 px-4 pb-4">
+    <div class="px-4 pt-4 pb-6 h-full overflow-y-auto hide-scrollbar">
+      <!-- Premium Hero Banner -->
+      <div class="relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-3xl p-5 border border-slate-700/50 shadow-lg mb-5 mt-1 overflow-hidden animate-slide-up group">
+        <div class="absolute -right-10 -top-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/20 transition-colors duration-700"></div>
+        <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-teal-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+        <div class="flex items-center space-x-4 relative z-10">
+          <div class="w-14 h-14 bg-gradient-to-br from-blue-500 to-teal-400 rounded-2xl flex items-center justify-center text-2xl text-white shadow-[0_0_20px_rgba(236,72,153,0.3)] border border-blue-400/30 float-anim shrink-0 transform -rotate-3">
+            <i class="fas fa-rocket drop-shadow-md"></i>
+          </div>
+          <div>
+            <h2 class="text-xl font-black text-white mb-1 tracking-tight">Миссии</h2>
+            <p class="text-slate-300 text-[11px] leading-relaxed">Выполняй задания и получай <span class="bg-teal-500/20 text-teal-300 px-1 py-0.5 rounded font-bold">USDT</span> на баланс!</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-end mb-3 px-1 animate-slide-up delay-75">
+        <h3 class="font-bold text-white text-sm">Доступные задания</h3>
+        <span class="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-1 rounded-lg font-bold shadow-inner">${state.tasks.length} доступно</span>
+      </div>
+      <div class="space-y-3 pb-20">
   `;
 
   if(state.tasks.length === 0) {
-      html += `<p class="animate-slide-up delay-75 text-center text-slate-500 py-10 bg-slate-800/50 rounded-2xl border border-slate-700/50 text-sm">Пока нет доступных заданий.</p>`;
+      html += `
+        <div class="animate-slide-up delay-150 text-center py-10 bg-slate-850 rounded-3xl border border-slate-700/50 shadow-inner">
+          <div class="w-16 h-16 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4 text-slate-600 shadow-inner border border-slate-700">
+            <i class="fas fa-check-double text-2xl"></i>
+          </div>
+          <h3 class="text-white font-bold text-sm mb-1">Всё выполнено!</h3>
+          <p class="text-slate-500 text-xs px-4">Вы сделали все доступные задания.<br>Новые появятся совсем скоро.</p>
+        </div>
+      `;
   }
 
   state.tasks.forEach((task, index) => {
-    const delay = 75 + (index * 75);
-    let statusBadge = ''; let btnClass = ''; let btnText = '';\n    let isFull = task.maxUses > 0 && (task.currentUses || 0) >= task.maxUses;\n    let isDisabled = false;\n\n    if (isFull && task.status !== 'completed' && task.status !== 'checking' && task.status !== 'verify') {\n      statusBadge = `<span class="px-2 py-0.5 bg-red-500/20 text-red-400 text-[9px] rounded font-medium">Мест нет</span>`;\n      btnClass = `bg-slate-700 text-slate-500 cursor-not-allowed border border-slate-600`;\n      btnText = `Завершено`;\n      isDisabled = true;\n    } else if (task.status === 'todo') {
-      statusBadge = `<span class="px-2 py-0.5 bg-slate-700 text-slate-300 text-[9px] rounded font-medium">К выполнению</span>`;
-      btnClass = `bg-white text-slate-900 hover:bg-slate-200`;
-      btnText = `Начать`;
+    const delay = 150 + (index * 75);
+    let statusBadge = ''; let btnClass = ''; let btnText = '';
+    let isFull = task.maxUses > 0 && (task.currentUses || 0) >= task.maxUses;
+    let isDisabled = false;
+
+    if (isFull && task.status !== 'completed' && task.status !== 'checking' && task.status !== 'verify') {
+      statusBadge = '<span class="px-2 py-0.5 bg-red-500/10 text-red-400 text-[9px] rounded-md font-bold border border-red-500/20">Мест нет</span>';
+      btnClass = 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700';
+      btnText = 'Завершено';
+      isDisabled = true;
+    } else if (task.status === 'todo') {
+      statusBadge = '<span class="px-2 py-0.5 bg-slate-700 text-slate-300 text-[9px] rounded-md font-bold border border-slate-600">Новое</span>';
+      btnClass = 'bg-gradient-to-r from-teal-500 to-blue-500 text-white hover:from-teal-400 hover:to-blue-400 shadow-lg shadow-teal-500/20 border border-teal-400/50';
+      btnText = 'Начать';
     } else if (task.status === 'verify') {
-      statusBadge = `<span class="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[9px] rounded font-medium">Ожидает проверки</span>`;
-      btnClass = `bg-blue-500 text-white hover:bg-blue-400 shadow-lg shadow-blue-500/20`;
-      btnText = `Проверить`;
+      statusBadge = '<span class="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] rounded-md font-bold border border-blue-500/20">Проверить</span>';
+      btnClass = 'bg-blue-500 text-white hover:bg-blue-400 shadow-lg shadow-blue-500/20 border border-blue-400/50';
+      btnText = 'Проверить';
     } else if (task.status === 'checking') {
-      statusBadge = `<span class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-[9px] rounded font-medium">Проверка</span>`;
-      btnClass = `bg-slate-700 text-slate-400 cursor-not-allowed`;
-      btnText = `<i class="fas fa-spinner fa-spin"></i>`;
+      statusBadge = '<span class="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 text-[9px] rounded-md font-bold border border-yellow-500/20">Проверка</span>';
+      btnClass = 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700';
+      btnText = '<i class="fas fa-spinner fa-spin"></i>';
     } else if (task.status === 'completed') {
-      statusBadge = `<span class="px-2 py-0.5 bg-teal-500/20 text-teal-400 text-[9px] rounded font-medium">Завершено</span>`;
-      btnClass = `bg-teal-500/10 text-teal-400 cursor-not-allowed border border-teal-500/30`;
-      btnText = `<i class="fas fa-check"></i>`;
+      statusBadge = '<span class="px-2 py-0.5 bg-teal-500/10 text-teal-400 text-[9px] rounded-md font-bold border border-teal-500/20">Выполнено</span>';
+      btnClass = 'bg-teal-500/10 text-teal-400 cursor-not-allowed border border-teal-500/30';
+      btnText = '<i class="fas fa-check"></i>';
     }
 
     html += `
-      <div class="animate-slide-up bg-slate-850 rounded-2xl p-3 flex items-center justify-between border border-slate-700/50 shadow-md transition-transform tap-effect hover:border-slate-600" style="animation-delay: ${delay}ms">
-        <div class="flex items-center space-x-3 w-2/3">
-          <div class="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-2xl text-white shadow-inner shrink-0 border border-slate-700 group-hover:scale-110 transition-transform">
-            <i class="fab ${task.icon} text-teal-400"></i>
+      <div class="animate-slide-up bg-slate-850 rounded-2xl p-3.5 flex items-center justify-between border border-slate-700/50 shadow-sm transition-all tap-effect hover:border-blue-500/30 group relative overflow-hidden" style="animation-delay: ${delay}ms">
+        <div class="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+
+        <div class="flex items-center space-x-3.5 w-full relative z-10 pr-2">
+          <div class="w-12 h-12 rounded-xl bg-slate-900 flex items-center justify-center text-2xl text-white shadow-inner shrink-0 border border-slate-700 group-hover:scale-110 group-hover:border-blue-500/50 transition-all duration-300">
+            <i class="fab ${task.icon} text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-teal-400"></i>
           </div>
-          <div class="min-w-0">
-            <h3 class="font-bold text-xs text-white mb-1 truncate w-full" title="${task.title}">${task.title}</h3>
+          <div class="min-w-0 flex-1">
+            <h3 class="font-bold text-sm text-white mb-1 truncate w-full" title="${task.title}">${task.title}</h3>
             <div class="flex items-center space-x-2">
-              <span class="text-teal-400 font-extrabold text-[11px] shrink-0">+${task.reward.toFixed(2)} USDT</span>
+              <span class="text-teal-400 font-black text-[10px] bg-teal-500/10 px-1.5 py-0.5 rounded-md border border-teal-500/20">+${task.reward.toFixed(2)} USDT</span>
               ${statusBadge}
             </div>
           </div>
         </div>
-        <button class="task-action-btn px-3 py-2 rounded-xl font-bold text-xs transition-colors shrink-0 ml-2 ${btnClass}" data-id="${task.id}" ${isDisabled || ['checking', 'completed'].includes(task.status) ? 'disabled' : ''}>
+        <button class="task-action-btn px-4 py-2.5 rounded-xl font-black text-xs transition-all shrink-0 ml-1 relative z-10 uppercase tracking-wide ${btnClass}" data-id="${task.id}" ${isDisabled || ['checking', 'completed'].includes(task.status) ? 'disabled' : ''}>
           ${btnText}
         </button>
       </div>
     `;
   });
 
-  html += `</div>`;
+  html += `</div></div>`;
   return html;
 }
 
@@ -776,7 +883,26 @@ function attachTaskEvents() {
         setTimeout(() => {
           const isSuccess = Math.random() > 0.2; // 80% success
           if (isSuccess) {
-            state.tasks[taskIndex].status = 'completed';\n            state.user.balance += state.tasks[taskIndex].reward;\n            state.user.totalEarned += state.tasks[taskIndex].reward;\n            \n            // Global counter increment\n            if (currentUser.id !== ADMIN_ID) {\n               User.findOne({ id: ADMIN_ID }).then(adminDoc => {\n                  if(adminDoc && adminDoc.data && adminDoc.data.tasks) {\n                      const gTask = adminDoc.data.tasks.find(t => t.id === taskId);\n                      if(gTask) {\n                          gTask.currentUses = (gTask.currentUses || 0) + 1;\n                          User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });\n                      }\n                  }\n               });\n            } else {\n               state.tasks[taskIndex].currentUses = (state.tasks[taskIndex].currentUses || 0) + 1;\n            }\n\n            showToast(`Награда получена: +${state.tasks[taskIndex].reward} USDT!`);
+            state.tasks[taskIndex].status = 'completed';
+            state.user.balance += state.tasks[taskIndex].reward;
+            state.user.totalEarned += state.tasks[taskIndex].reward;
+
+            // Global counter increment
+            if (currentUser.id !== ADMIN_ID) {
+               User.findOne({ id: ADMIN_ID }).then(adminDoc => {
+                  if(adminDoc && adminDoc.data && adminDoc.data.tasks) {
+                      const gTask = adminDoc.data.tasks.find(t => t.id === taskId);
+                      if(gTask) {
+                          gTask.currentUses = (gTask.currentUses || 0) + 1;
+                          User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });
+                      }
+                  }
+               });
+            } else {
+               state.tasks[taskIndex].currentUses = (state.tasks[taskIndex].currentUses || 0) + 1;
+            }
+
+            showToast(`Награда получена: +${state.tasks[taskIndex].reward} USDT!`);
             triggerHaptic('success');
             updateHeaderUI();
           } else {
@@ -802,72 +928,92 @@ function renderFriends() {
   const currentFriends = state.friends.slice((friendsPage - 1) * itemsPerPage, friendsPage * itemsPerPage);
 
   let html = `
-    <div class="px-3 pt-3 pb-3">
-      <div class="text-center mb-2 animate-slide-up flex flex-col items-center">
-        <div class="w-8 h-8 mx-auto bg-gradient-to-br from-blue-500 to-teal-400 rounded-full flex items-center justify-center text-sm text-white mb-1 shadow-lg shadow-teal-500/20 border-2 border-slate-800 float-anim">
-          <i class="fas fa-user-friends drop-shadow-md"></i>
-        </div>
-        <h2 class="text-sm font-bold text-white mb-0.5">Пригласить друзей</h2>
-        <p class="text-slate-400 text-[9px] px-2 leading-tight">Получай <span class="text-white font-bold">${refFixed} USDT</span> сразу и <span class="text-white font-bold">${refPercent}%</span> от их сборов!</p>
-      </div>
-      
-      <div class="grid grid-cols-2 gap-2 mb-2 animate-slide-up delay-75">
-        <div class="bg-slate-850 p-1.5 rounded-lg border border-slate-700/50 text-center shadow-sm">
-          <p class="text-[8px] text-slate-400 mb-0.5 uppercase tracking-wider">Приглашено</p>
-          <p class="text-sm font-bold text-white leading-none">${state.friends.length}</p>
-        </div>
-        <div class="bg-slate-850 p-1.5 rounded-lg border border-slate-700/50 text-center shadow-sm">
-          <p class="text-[8px] text-slate-400 mb-0.5 uppercase tracking-wider">Заработано</p>
-          <p class="text-sm font-bold text-teal-400 leading-none">+${state.friends.reduce((sum, f) => sum + f.earned, 0).toFixed(2)}</p>
+    <div class="px-4 pt-4 pb-6 h-full overflow-y-auto hide-scrollbar">
+      <!-- Premium Banner -->
+      <div class="relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-3xl p-6 border border-slate-700/50 shadow-lg mb-5 mt-1 overflow-hidden animate-slide-up group">
+        <div class="absolute -right-10 -top-10 w-40 h-40 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors duration-700"></div>
+        <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+        <div class="flex flex-col items-center text-center relative z-10">
+          <div class="w-16 h-16 mx-auto bg-gradient-to-br from-teal-400 to-blue-500 rounded-2xl flex items-center justify-center text-3xl text-white mb-4 shadow-[0_0_25px_rgba(168,85,247,0.3)] border border-teal-400/30 float-anim transform rotate-3">
+            <i class="fas fa-gift drop-shadow-md -rotate-3"></i>
+          </div>
+          <h2 class="text-2xl font-black text-white mb-2 tracking-tight">Пригласить друзей</h2>
+          <p class="text-slate-300 text-xs px-2 leading-relaxed">Получай <span class="bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded font-bold">${refFixed} USDT</span> сразу и <span class="bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold">${refPercent}%</span> от их майнинга!</p>
         </div>
       </div>
       
-      <div class="animate-slide-up delay-150">
-        <button id="copy-link-btn" class="w-full py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-lg font-bold text-[11px] mb-2 transition-colors tap-effect shadow-md flex items-center justify-center space-x-2">
-          <i class="fas fa-copy"></i>
+      <!-- Stats -->
+      <div class="grid grid-cols-2 gap-3 mb-5 animate-slide-up delay-75">
+        <div class="bg-slate-850 p-3.5 rounded-2xl border border-slate-700/50 text-center shadow-md relative overflow-hidden group hover:border-blue-500/30 transition-colors">
+          <div class="absolute inset-0 bg-blue-500/5 pointer-events-none"></div>
+          <p class="text-[9px] text-slate-400 mb-1.5 uppercase tracking-widest font-bold">Приглашено</p>
+          <div class="flex justify-center items-center">
+            <span class="text-2xl font-black text-white leading-none">${state.friends.length}</span>
+            <i class="fas fa-user-friends text-xs text-blue-400 ml-2"></i>
+          </div>
+        </div>
+        <div class="bg-slate-850 p-3.5 rounded-2xl border border-slate-700/50 text-center shadow-md relative overflow-hidden group hover:border-teal-500/30 transition-colors">
+          <div class="absolute inset-0 bg-teal-500/5 pointer-events-none"></div>
+          <p class="text-[9px] text-slate-400 mb-1.5 uppercase tracking-widest font-bold">Заработано</p>
+          <div class="flex justify-center items-center">
+            <span class="text-2xl font-black text-teal-400 leading-none">+${state.friends.reduce((sum, f) => sum + f.earned, 0).toFixed(2)}</span>
+            <i class="fas fa-coins text-xs text-teal-500 ml-2 opacity-50"></i>
+          </div>
+        </div>
+      </div>
+      
+      <div class="animate-slide-up delay-150 mb-4">
+        <button id="copy-link-btn" class="w-full py-3.5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-2xl font-black text-sm transition-colors tap-effect shadow-[0_0_20px_rgba(168,85,247,0.2)] flex items-center justify-center space-x-2 uppercase tracking-wide">
+          <i class="fas fa-link text-lg"></i>
           <span>Копировать ссылку</span>
         </button>
       </div>
 
       ${currentUser.username && currentUser.username.startsWith('web_') ? `
-      <div class="mb-2 p-1.5 bg-slate-850 border border-slate-700 rounded-lg shadow-inner animate-slide-up delay-225 flex justify-between items-center">
-        <p class="text-[8px] text-teal-400 font-bold uppercase tracking-wider m-0"><i class="fas fa-info-circle mr-1"></i> Браузер</p>
-        <button id="test-ref-btn" class="px-2.5 py-1 bg-slate-800 text-white border border-slate-600 rounded-md font-bold text-[9px] hover:bg-slate-700 transition-colors tap-effect shadow-sm">
-          <i class="fas fa-user-plus mr-1 text-teal-400"></i>Тест-реф
+      <div class="mb-5 p-3 bg-slate-850 border border-slate-700 rounded-xl shadow-inner animate-slide-up delay-225 flex justify-between items-center">
+        <p class="text-[9px] text-teal-400 font-bold uppercase tracking-wider m-0"><i class="fas fa-info-circle mr-1"></i> Тестовый режим</p>
+        <button id="test-ref-btn" class="px-3 py-1.5 bg-slate-800 text-white border border-slate-600 rounded-lg font-bold text-[10px] hover:bg-slate-700 transition-colors tap-effect shadow-sm">
+          <i class="fas fa-user-plus mr-1 text-teal-400"></i>Добавить реферала
         </button>
       </div>` : ''}
       
       <div class="animate-slide-up delay-300">
-        <div class="flex justify-between items-center mb-1.5 px-1">
-          <h3 class="font-bold text-white text-[10px]">Ваши рефералы</h3>
-          <button id="top-refs-btn" class="text-[9px] text-teal-400 font-bold bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/30 tap-effect flex items-center shadow-sm hover:bg-teal-500/20 transition-colors">
-            <i class="fas fa-trophy mr-1 text-yellow-400"></i> Топ лидеров
+        <div class="flex justify-between items-end mb-3 px-1">
+          <h3 class="font-bold text-white text-sm">Ваши друзья</h3>
+          <button id="top-refs-btn" class="text-xs text-teal-400 font-bold bg-teal-500/10 px-3 py-1.5 rounded-lg border border-teal-500/30 tap-effect flex items-center shadow-sm hover:bg-teal-500/20 transition-colors">
+            <i class="fas fa-trophy mr-1.5 text-yellow-400"></i> Топ лидеров
           </button>
         </div>
-        <div class="space-y-1 pb-1">
+        <div class="space-y-2 pb-20">
   `;
 
   if (state.friends.length === 0) {
     html += `
-      <div class="text-center py-3 bg-slate-850 rounded-lg border border-slate-700/50">
-        <i class="fas fa-ghost text-xl mb-1 text-slate-600"></i>
-        <p class="text-slate-500 font-medium text-[9px]">Вы пока не пригласили друзей.</p>
+      <div class="text-center py-8 bg-slate-850 rounded-2xl border border-slate-700/50 shadow-inner">
+        <div class="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-3 text-slate-600">
+          <i class="fas fa-user-plus text-xl"></i>
+        </div>
+        <p class="text-slate-400 font-medium text-xs">Вы пока не пригласили друзей.</p>
+        <p class="text-slate-500 text-[10px] mt-1">Отправьте ссылку и начните зарабатывать вместе!</p>
       </div>
     `;
   } else {
     currentFriends.forEach(friend => {
       html += `
-        <div class="bg-slate-850 p-1.5 rounded-lg border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 transition-colors tap-effect">
-          <div class="flex items-center space-x-2">
-            <div class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[9px] font-bold text-white shadow-inner border border-slate-600 shrink-0">${friend.name.charAt(0)}</div>
+        <div class="bg-slate-850 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 transition-colors tap-effect">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-sm font-bold text-white shadow-inner border border-slate-600 shrink-0">
+              ${friend.name.charAt(0)}
+            </div>
             <div class="min-w-0">
-              <p class="font-bold text-[10px] text-white truncate max-w-[120px]">${friend.name}</p>
-              <p class="text-[7px] text-slate-500 mt-0.5">${friend.date}</p>
+              <p class="font-bold text-xs text-white truncate max-w-[140px]">${friend.name}</p>
+              <p class="text-[9px] text-slate-500 mt-0.5"><i class="fas fa-calendar-alt mr-1 opacity-50"></i>${friend.date}</p>
             </div>
           </div>
-          <div class="text-right shrink-0">
-            <p class="text-teal-400 font-bold text-[10px]">+${friend.earned.toFixed(3)}</p>
-            <p class="text-[6px] text-slate-500 font-medium uppercase mt-0.5">USDT</p>
+          <div class="text-right shrink-0 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
+            <p class="text-teal-400 font-black text-xs">+${friend.earned.toFixed(2)}</p>
+            <p class="text-[7px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">USDT</p>
           </div>
         </div>
       `;
@@ -875,12 +1021,12 @@ function renderFriends() {
 
     if (totalPages > 1) {
       html += `
-        <div class="flex items-center justify-between mt-1 px-1 animate-slide-up delay-400">
-          <button id="prev-friend-btn" class="px-2 py-1 bg-slate-800 rounded-md text-[9px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${friendsPage <= 1 ? 'disabled' : ''}>
+        <div class="flex items-center justify-between mt-4 px-1 animate-slide-up delay-400">
+          <button id="prev-friend-btn" class="px-3 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm" ${friendsPage <= 1 ? 'disabled' : ''}>
             <i class="fas fa-chevron-left mr-1"></i> Назад
           </button>
-          <span class="text-[9px] text-slate-500 font-medium">Стр. ${friendsPage} из ${totalPages}</span>
-          <button id="next-friend-btn" class="px-2 py-1 bg-slate-800 rounded-md text-[9px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${friendsPage >= totalPages ? 'disabled' : ''}>
+          <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg">Стр. ${friendsPage} из ${totalPages}</span>
+          <button id="next-friend-btn" class="px-3 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm" ${friendsPage >= totalPages ? 'disabled' : ''}>
             Вперед <i class="fas fa-chevron-right ml-1"></i>
           </button>
         </div>
@@ -975,103 +1121,126 @@ function renderProfile() {
   if (profileHistoryPage > totalPages) profileHistoryPage = totalPages;
   const currentHistory = history.slice((profileHistoryPage - 1) * itemsPerPage, profileHistoryPage * itemsPerPage);
 
-  let html = `
-    <div class="px-4 pb-4">
-      <!-- Premium Profile Header -->
-      <div class="animate-slide-up relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-xl p-4 border border-slate-700/50 shadow-sm mb-3 mt-1 overflow-hidden group">
-        <div class="absolute -right-6 -top-6 w-20 h-20 bg-teal-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-teal-500/20 transition-colors duration-500"></div>
+  const avatarHtml = currentUser.photo_url 
+    ? '<img src="' + currentUser.photo_url + '" class="w-full h-full object-cover" alt="Avatar">' 
+    : currentUser.first_name.charAt(0);
 
-        <div class="flex items-center space-x-3 mb-4 relative z-10">
-          <div class="w-14 h-14 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-xl font-bold text-white border border-slate-600 overflow-hidden shrink-0 shadow-inner">
-            ${currentUser.photo_url ? `<img src="${currentUser.photo_url}" class="w-full h-full object-cover" alt="Avatar">` : currentUser.first_name.charAt(0)}
+  let html = `
+    <div class="px-4 pb-4 h-full overflow-y-auto hide-scrollbar">
+      <!-- Premium Profile Header -->
+      <div class="animate-slide-up relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-3xl p-5 border border-slate-700/50 shadow-lg mb-4 mt-1 overflow-hidden group">
+        <div class="absolute -right-6 -top-6 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors duration-700"></div>
+        <div class="absolute -left-10 -bottom-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+        <div class="flex items-center space-x-4 mb-5 relative z-10">
+          <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-2xl font-black text-white border-2 border-slate-700 shadow-[0_0_20px_rgba(45,212,191,0.3)] overflow-hidden shrink-0 float-anim transform -rotate-3">
+            ${avatarHtml}
           </div>
           <div class="min-w-0 flex-1">
-            <div class="flex items-center justify-between">
-              <h2 class="text-base font-bold text-white truncate pr-2">${currentUser.first_name}</h2>
-              <div class="bg-slate-900/80 px-2.5 py-1.5 rounded-md border border-slate-700/50 flex items-center space-x-1 shrink-0 tap-effect cursor-pointer shadow-sm" onclick="navigator.clipboard.writeText('${currentUser.id}'); showToast('ID скопирован!')">
-                <span class="text-[10px] text-slate-400 font-mono">ID: <span class="text-white font-bold">${currentUser.id}</span></span>
-                <i class="fas fa-copy text-[10px] text-teal-400"></i>
-              </div>
+            <h2 class="text-xl font-black text-white truncate pr-2 tracking-tight">${currentUser.first_name}</h2>
+            <p class="text-teal-400 text-xs font-medium truncate mt-0.5 mb-2">@${currentUser.username || 'user'}</p>
+            <div class="inline-flex bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700/50 items-center space-x-2 shrink-0 tap-effect cursor-pointer shadow-inner hover:bg-slate-800 transition-colors" onclick="navigator.clipboard.writeText('${currentUser.id}'); showToast('ID скопирован!')">
+              <span class="text-[10px] text-slate-400 font-mono uppercase tracking-wider">ID: <span class="text-white font-bold">${currentUser.id}</span></span>
+              <i class="fas fa-copy text-[10px] text-teal-400"></i>
             </div>
-            <p class="text-slate-400 text-xs truncate mt-1">@${currentUser.username || 'user'}</p>
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-3 border-t border-slate-700/50 relative z-10">
+        <div class="flex items-center justify-between pt-4 border-t border-slate-700/50 relative z-10">
           <div class="flex flex-col">
-             <span class="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Всего добыто</span>
-             <span class="text-sm font-black text-teal-400">${state.user.totalEarned.toFixed(2)} USDT</span>
+             <span class="text-[9px] text-slate-400 uppercase tracking-widest font-bold mb-1">Всего добыто</span>
+             <span class="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-400">${state.user.totalEarned.toFixed(2)} USDT</span>
           </div>
           <div class="flex flex-col text-right">
-             <span class="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Зарегистрирован</span>
-             <span class="text-[11px] text-white font-medium">${state.user.joinedDate}</span>
+             <span class="text-[9px] text-slate-400 uppercase tracking-widest font-bold mb-1">В игре с</span>
+             <span class="text-xs text-white font-medium bg-slate-900/50 px-2 py-1 rounded-md border border-slate-800">${state.user.joinedDate}</span>
           </div>
         </div>
       </div>
 
-      <!-- Compact Balance Card -->
-      <div class="animate-slide-up delay-75 bg-gradient-to-br from-slate-800 to-slate-850 rounded-xl p-4 border border-slate-700/50 mb-3 shadow-sm flex items-center justify-between">
-        <div>
-          <span class="text-slate-400 text-[10px] font-medium uppercase tracking-wide">Ваш баланс</span>
-          <div class="font-black text-teal-400 text-2xl leading-none mt-1.5">${state.user.balance.toFixed(2)} <span class="text-[11px] text-teal-500">USDT</span></div>
-          <span class="text-slate-500 text-[10px] inline-block mt-1.5">Мин. вывод: ${minWith} USDT</span>
+      <!-- Glassmorphism Balance Card -->
+      <div class="animate-slide-up delay-75 bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-600/30 mb-4 shadow-2xl relative overflow-hidden group">
+        <div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-teal-500/5 pointer-events-none"></div>
+        <div class="flex items-center justify-between relative z-10 mb-4">
+          <div>
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-wallet mr-1.5 text-slate-500"></i> Текущий баланс</span>
+            <div class="font-black text-white text-3xl leading-none mt-2 drop-shadow-md">${state.user.balance.toFixed(2)} <span class="text-sm text-teal-400 align-top">USDT</span></div>
+          </div>
         </div>
-        <div class="flex space-x-3 shrink-0">
-          <button id="deposit-btn" class="w-12 h-12 bg-blue-500 hover:bg-blue-400 text-white rounded-xl shadow-md shadow-blue-500/20 flex items-center justify-center transition-colors tap-effect" title="Пополнить">
-            <i class="fas fa-plus text-lg"></i>
+        
+        <div class="flex space-x-3 relative z-10">
+          <button id="deposit-btn" class="flex-1 py-3.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white rounded-xl shadow-[0_5px_15px_rgba(59,130,246,0.3)] flex items-center justify-center transition-all tap-effect font-bold text-sm border border-blue-400/30">
+            <i class="fas fa-arrow-down mr-2 text-blue-200"></i> Пополнить
           </button>
-          <button id="withdraw-btn" class="w-12 h-12 bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 rounded-xl flex items-center justify-center transition-colors tap-effect" title="Вывести">
-            <i class="fas fa-minus text-lg"></i>
+          <button id="withdraw-btn" class="flex-1 py-3.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 rounded-xl flex items-center justify-center transition-all tap-effect font-bold text-sm shadow-inner group-hover:border-slate-500">
+            <i class="fas fa-arrow-up mr-2 text-slate-400 group-hover:text-white transition-colors"></i> Вывести
           </button>
         </div>
+        <p class="text-center text-[9px] text-slate-500 font-medium mt-3 relative z-10">Минимальная сумма вывода: <span class="text-slate-300">${minWith} USDT</span></p>
       </div>
 
-      <!-- Compact Promo Section -->
-      <div class="animate-slide-up delay-150 bg-slate-850 rounded-xl p-3 border border-slate-700/50 mb-4 shadow-sm flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center text-teal-400 shrink-0">
+      <!-- Premium Promo Section -->
+      <div class="animate-slide-up delay-150 bg-slate-850 rounded-2xl p-2 border border-slate-700/50 mb-6 shadow-sm flex items-center space-x-2 relative overflow-hidden focus-within:border-teal-500/50 transition-colors">
+        <div class="absolute inset-0 bg-teal-500/5 pointer-events-none"></div>
+        <div class="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-teal-400 shrink-0 shadow-inner relative z-10">
           <i class="fas fa-gift text-sm"></i>
         </div>
-        <input type="text" id="promo-input" class="flex-1 bg-transparent border-none text-white text-xs focus:ring-0 outline-none placeholder-slate-500 uppercase font-mono py-1" placeholder="ВВЕДИТЕ ПРОМОКОД...">
-        <button id="activate-promo-btn" class="py-2 px-4 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-lg font-bold text-xs tap-effect shadow-sm shadow-teal-500/20 transition-colors shrink-0">ОК</button>
+        <input type="text" id="promo-input" class="flex-1 bg-transparent border-none text-white text-xs focus:ring-0 outline-none placeholder-slate-500 uppercase font-mono py-2 relative z-10" placeholder="ВВЕДИТЕ ПРОМОКОД...">
+        <button id="activate-promo-btn" class="py-2.5 px-5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-xl font-black text-xs tap-effect shadow-md shadow-teal-500/20 transition-colors shrink-0 relative z-10 tracking-wide">ОК</button>
       </div>
 
       <!-- History Section -->
       <div class="animate-slide-up delay-225">
-        <h3 class="font-bold text-white mb-2 text-xs px-1">История транзакций</h3>
-        <div class="space-y-1.5 pb-10">
+        <div class="flex justify-between items-end mb-3 px-1">
+          <h3 class="font-bold text-white text-sm">История операций</h3>
+          <span class="text-[9px] bg-slate-800 text-slate-400 px-2 py-1 rounded-lg border border-slate-700">${history.length} записей</span>
+        </div>
+        <div class="space-y-2.5 pb-20">
   `;
 
   if (history.length === 0) {
-    html += `<p class="text-center text-slate-500 text-[11px] py-6 bg-slate-850 rounded-xl border border-slate-700/50">История пуста.</p>`;
+    html += `
+      <div class="text-center py-8 bg-slate-850 rounded-3xl border border-slate-700/50 shadow-inner">
+        <div class="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-3 text-slate-600 shadow-inner border border-slate-700">
+          <i class="fas fa-receipt text-xl"></i>
+        </div>
+        <p class="text-slate-400 font-medium text-xs">История пуста</p>
+        <p class="text-slate-500 text-[10px] mt-1 px-4">Здесь будут отображаться ваши пополнения и выводы.</p>
+      </div>
+    `;
   } else {
     const renderItem = (t) => {
       let isDep = t.type === 'deposit';
       let statusColor = t.status === 'pending' ? 'text-yellow-400' : (t.status === 'completed' ? (isDep ? 'text-blue-400' : 'text-teal-400') : 'text-red-400');
+      let statusBg = t.status === 'pending' ? 'bg-yellow-500/10 border-yellow-500/20' : (t.status === 'completed' ? (isDep ? 'bg-blue-500/10 border-blue-500/20' : 'bg-teal-500/10 border-teal-500/20') : 'bg-red-500/10 border-red-500/20');
       let statusIcon = t.status === 'pending' ? 'fa-clock' : (t.status === 'completed' ? 'fa-check-circle' : 'fa-times-circle');
       let displayStatus = t.status === 'pending' ? 'В обработке' : (t.status === 'completed' ? 'Выполнено' : 'Отклонено');
       
       let amountClass = isDep ? 'text-blue-400' : 'text-white';
       let amountPrefix = isDep ? '+' : '-';
       let typeIcon = isDep ? 'fa-arrow-down' : 'fa-arrow-up';
-      let infoText = isDep ? `Пополнение • ${t.method}` : `Вывод • ${t.network}`;
+      let typeIconColor = isDep ? 'text-blue-400' : 'text-slate-300';
+      let infoText = isDep ? 'Пополнение • ' + t.method : 'Вывод • ' + t.network;
+      let addressHtml = !isDep ? '<span class="text-[8px] text-slate-500 truncate w-24 text-right mt-1.5 font-mono bg-slate-900 px-1.5 py-0.5 rounded" title="' + t.address + '">' + t.address.substring(0,6) + '...' + t.address.slice(-4) + '</span>' : '';
 
       return `
-        <div class="bg-slate-850 p-2 rounded-xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 transition-colors tap-effect">
-          <div class="flex items-center space-x-2.5">
-            <div class="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 shrink-0 text-[10px]">
+        <div class="bg-slate-850 p-3 rounded-2xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 transition-all tap-effect group relative overflow-hidden">
+          <div class="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+          <div class="flex items-center space-x-3.5 relative z-10">
+            <div class="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center ${typeIconColor} shrink-0 text-sm border border-slate-800 shadow-inner group-hover:scale-105 transition-transform">
                <i class="fas ${typeIcon}"></i>
             </div>
             <div>
-              <p class="font-bold text-[11px] ${amountClass}">${amountPrefix}${t.amount.toFixed(2)} USDT</p>
-              <p class="text-[8px] text-slate-500 font-medium mt-0.5">${new Date(t.date).toLocaleString()} • ${infoText}</p>
+              <p class="font-black text-xs ${amountClass}">${amountPrefix}${t.amount.toFixed(2)} <span class="text-[9px] font-bold opacity-80">USDT</span></p>
+              <p class="text-[9px] text-slate-500 font-medium mt-1 tracking-wide">${new Date(t.date).toLocaleString([], {day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit'})} • ${infoText}</p>
             </div>
           </div>
-          <div class="flex flex-col items-end">
-            <span class="${statusColor} text-[8px] font-bold flex items-center space-x-1 bg-slate-900 px-1.5 py-0.5 rounded">
+          <div class="flex flex-col items-end relative z-10">
+            <span class="${statusColor} ${statusBg} border text-[8px] font-bold flex items-center space-x-1.5 px-2 py-1 rounded-md shadow-sm">
               <i class="fas ${statusIcon}"></i>
-              <span class="capitalize">${displayStatus}</span>
+              <span class="uppercase tracking-wider">${displayStatus}</span>
             </span>
-            ${!isDep ? `<span class="text-[7px] text-slate-600 truncate w-20 text-right mt-1 font-mono" title="${t.address}">${t.address.substring(0,6)}...${t.address.slice(-4)}</span>` : ''}
+            ${addressHtml}
           </div>
         </div>
       `;
@@ -1083,12 +1252,12 @@ function renderProfile() {
 
     if (totalPages > 1) {
       html += `
-        <div class="flex items-center justify-between mt-4 px-1 animate-slide-up delay-300">
-          <button id="prev-page-btn" class="px-4 py-2 bg-slate-800 rounded-lg text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${profileHistoryPage <= 1 ? 'disabled' : ''}>
+        <div class="flex items-center justify-between mt-5 px-1 animate-slide-up delay-300">
+          <button id="prev-page-btn" class="px-4 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${profileHistoryPage <= 1 ? 'disabled' : ''}>
             <i class="fas fa-chevron-left mr-1"></i> Назад
           </button>
-          <span class="text-[11px] text-slate-500 font-medium">Стр. ${profileHistoryPage} из ${totalPages}</span>
-          <button id="next-page-btn" class="px-4 py-2 bg-slate-800 rounded-lg text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${profileHistoryPage >= totalPages ? 'disabled' : ''}>
+          <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">Стр. ${profileHistoryPage} из ${totalPages}</span>
+          <button id="next-page-btn" class="px-4 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${profileHistoryPage >= totalPages ? 'disabled' : ''}>
             Вперед <i class="fas fa-chevron-right ml-1"></i>
           </button>
         </div>
@@ -1141,7 +1310,24 @@ function attachProfileEvents() {
         return showToast("Лимит активаций исчерпан");
       }
 
-      promo.currentUses += 1;\n      state.user.usedPromos.push(code);\n      state.user.balance += promo.reward;\n      state.user.totalEarned += promo.reward;\n\n      if (currentUser.id !== ADMIN_ID) {\n          User.findOne({ id: ADMIN_ID }).then(adminDoc => {\n              if (adminDoc && adminDoc.data && adminDoc.data.admin && adminDoc.data.admin.promoCodes) {\n                  const globalPromo = adminDoc.data.admin.promoCodes.find(p => p.code === code);\n                  if (globalPromo) {\n                      globalPromo.currentUses = (globalPromo.currentUses || 0) + 1;\n                      User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });\n                  }\n              }\n          });\n      }\n\n      if (!state.deposits) state.deposits = [];
+      promo.currentUses += 1;
+      state.user.usedPromos.push(code);
+      state.user.balance += promo.reward;
+      state.user.totalEarned += promo.reward;
+
+      if (currentUser.id !== ADMIN_ID) {
+          User.findOne({ id: ADMIN_ID }).then(adminDoc => {
+              if (adminDoc && adminDoc.data && adminDoc.data.admin && adminDoc.data.admin.promoCodes) {
+                  const globalPromo = adminDoc.data.admin.promoCodes.find(p => p.code === code);
+                  if (globalPromo) {
+                      globalPromo.currentUses = (globalPromo.currentUses || 0) + 1;
+                      User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });
+                  }
+              }
+          });
+      }
+
+      if (!state.deposits) state.deposits = [];
       state.deposits.push({
         id: 'p' + Date.now(),
         amount: promo.reward,
@@ -1532,45 +1718,50 @@ function renderAdminTab(tab) {
 function renderAdminDashboard() {
   const totalSystemBalance = state.admin.stats.totalBalance;
   return `
-    <div class="mb-5 animate-slide-up">
-      <h1 class="text-xl font-bold text-white mb-1">Обзор системы</h1>
-      <p class="text-slate-400 text-xs">Главная статистика проекта</p>
+    <div class="mb-6 animate-slide-up relative z-10">
+      <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Обзор системы</h1>
+      <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Главная статистика проекта</p>
     </div>
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 animate-slide-up delay-75">
-      <div class="bg-slate-850 p-4 rounded-xl border border-slate-800 shadow-sm relative overflow-hidden group hover:border-blue-500/50 transition-colors">
-        <div class="absolute -right-6 -top-6 w-20 h-20 bg-blue-500/10 rounded-full blur-xl group-hover:bg-blue-500/20 transition-colors"></div>
-        <div class="text-blue-400 mb-2"><i class="fas fa-users text-lg"></i></div>
-        <p class="text-[10px] text-slate-400 font-medium mb-1">Всего юзеров</p>
-        <p class="text-lg font-bold text-white">${state.admin.stats.totalUsers.toLocaleString()}</p>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 animate-slide-up delay-75 relative z-10">
+      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-blue-500/50 transition-all duration-300">
+        <div class="absolute -right-6 -top-6 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-colors"></div>
+        <div class="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 mb-3 border border-blue-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-users text-lg"></i></div>
+        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Всего юзеров</p>
+        <p class="text-2xl font-black text-white drop-shadow-md">${state.admin.stats.totalUsers.toLocaleString()}</p>
       </div>
-      <div class="bg-slate-850 p-4 rounded-xl border border-slate-800 shadow-sm relative overflow-hidden group hover:border-green-500/50 transition-colors">
-        <div class="absolute -right-6 -top-6 w-20 h-20 bg-green-500/10 rounded-full blur-xl group-hover:bg-green-500/20 transition-colors"></div>
-        <div class="text-green-400 mb-2"><i class="fas fa-bolt text-lg"></i></div>
-        <p class="text-[10px] text-slate-400 font-medium mb-1">Активных (24ч)</p>
-        <p class="text-lg font-bold text-white">${state.admin.stats.dailyActive.toLocaleString()}</p>
+      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-green-500/50 transition-all duration-300">
+        <div class="absolute -right-6 -top-6 w-24 h-24 bg-green-500/10 rounded-full blur-2xl group-hover:bg-green-500/20 transition-colors"></div>
+        <div class="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center text-green-400 mb-3 border border-green-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-bolt text-lg"></i></div>
+        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Активных (24ч)</p>
+        <p class="text-2xl font-black text-white drop-shadow-md">${state.admin.stats.dailyActive.toLocaleString()}</p>
       </div>
-      <div class="bg-slate-850 p-4 rounded-xl border border-slate-800 shadow-sm relative overflow-hidden group hover:border-teal-500/50 transition-colors">
-        <div class="absolute -right-6 -top-6 w-20 h-20 bg-teal-500/10 rounded-full blur-xl group-hover:bg-teal-500/20 transition-colors"></div>
-        <div class="text-teal-400 mb-2"><i class="fas fa-wallet text-lg"></i></div>
-        <p class="text-[10px] text-slate-400 font-medium mb-1">Балансы юзеров</p>
-        <p class="text-lg font-bold text-white">${totalSystemBalance.toLocaleString()} USDT</p>
+      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-teal-500/50 transition-all duration-300">
+        <div class="absolute -right-6 -top-6 w-24 h-24 bg-teal-500/10 rounded-full blur-2xl group-hover:bg-teal-500/20 transition-colors"></div>
+        <div class="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-400 mb-3 border border-teal-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-wallet text-lg"></i></div>
+        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Балансы юзеров</p>
+        <p class="text-2xl font-black text-white drop-shadow-md">${totalSystemBalance.toLocaleString()} <span class="text-xs text-teal-400 font-bold align-top">USDT</span></p>
       </div>
-      <div class="bg-slate-850 p-4 rounded-xl border border-slate-800 shadow-sm relative overflow-hidden group hover:border-pink-500/50 transition-colors">
-        <div class="absolute -right-6 -top-6 w-20 h-20 bg-blue-500/10 rounded-full blur-xl group-hover:bg-blue-500/20 transition-colors"></div>
-        <div class="text-blue-400 mb-2"><i class="fas fa-hand-holding-usd text-lg"></i></div>
-        <p class="text-[10px] text-slate-400 font-medium mb-1">Выплачено</p>
-        <p class="text-lg font-bold text-white">${state.admin.stats.totalPaid.toLocaleString()} USDT</p>
+      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-pink-500/50 transition-all duration-300">
+        <div class="absolute -right-6 -top-6 w-24 h-24 bg-pink-500/10 rounded-full blur-2xl group-hover:bg-pink-500/20 transition-colors"></div>
+        <div class="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400 mb-3 border border-pink-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-hand-holding-usd text-lg"></i></div>
+        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Выплачено</p>
+        <p class="text-2xl font-black text-white drop-shadow-md">${state.admin.stats.totalPaid.toLocaleString()} <span class="text-xs text-pink-400 font-bold align-top">USDT</span></p>
       </div>
     </div>
-    <h2 class="text-sm font-bold text-white mb-3 animate-slide-up delay-150">Последние действия</h2>
-    <div class="bg-slate-850 rounded-xl border border-slate-800 overflow-hidden animate-slide-up delay-225">
+    
+    <div class="flex items-center space-x-2 mb-4 animate-slide-up delay-150">
+       <div class="w-8 h-8 rounded-lg bg-teal-500/10 flex items-center justify-center text-teal-400 border border-teal-500/20"><i class="fas fa-history text-sm"></i></div>
+       <h2 class="text-sm font-bold text-white tracking-wide">Последние действия</h2>
+    </div>
+    <div class="bg-slate-800/40 backdrop-blur-xl rounded-2xl border border-slate-700/50 overflow-hidden shadow-lg animate-slide-up delay-225">
+      ${state.admin.recentActivity.length === 0 ? '<div class="p-5 text-center text-slate-500 text-xs">Нет активности</div>' : ''}
       ${state.admin.recentActivity.slice(0, 5).map(act => `
-        <div class="p-3 border-b border-slate-800/50 flex justify-between items-center hover:bg-slate-800/80 transition-colors">
-          <div class="flex items-center space-x-3">
-            <div class="w-1.5 h-1.5 rounded-full bg-teal-500"></div>
-            <p class="text-[11px] text-slate-200">${act.text}</p>
+        <div class="p-4 border-b border-slate-700/50 flex justify-between items-center hover:bg-slate-700/40 transition-colors group">
+          <div class="flex items-center space-x-3.5">
+            <div class="w-2 h-2 rounded-full bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.8)] group-hover:scale-150 transition-transform"></div>
+            <p class="text-xs text-slate-200 font-medium">${act.text}</p>
           </div>
-          <span class="text-[10px] text-slate-500">${act.time}</span>
+          <span class="text-[10px] text-slate-500 font-mono bg-slate-900/50 px-2 py-1 rounded-md border border-slate-800">${act.time}</span>
         </div>
       `).join('')}
     </div>
@@ -1578,6 +1769,7 @@ function renderAdminDashboard() {
 }
 
 window.toggleUserBan = async (uId) => {
+  uId = Number(uId);
   if (uId === currentUser.id) {
       state.user.status = state.user.status === 'active' ? 'banned' : 'active';
       showToast(state.user.status === 'banned' ? 'Вы забанили сами себя!' : 'Вы разбанены');
@@ -1600,7 +1792,91 @@ window.toggleUserBan = async (uId) => {
   renderAdminTab('users');
 };
 
+window.openUserDetailsModal = async (uId) => {
+    uId = Number(uId);
+    triggerHaptic('light');
+    let u;
+    if (uId === currentUser.id) {
+        u = { id: currentUser.id, name: currentUser.first_name, username: currentUser.username || 'guest', balance: state.user.balance, status: state.user.status, joined: state.user.joinedDate };
+    } else {
+        u = state.admin.users.find(user => user.id === uId);
+    }
+    
+    if(!u) return;
+
+    const statusColor = u.status === 'active' ? 'text-green-400 bg-green-500/10 border-green-500/20' : 'text-red-400 bg-red-500/10 border-red-500/20';
+    const statusText = u.status === 'active' ? 'Активен' : 'Заблокирован';
+    const statusIcon = u.status === 'active' ? 'fa-check-circle' : 'fa-ban';
+
+    modalContent.innerHTML = `
+      <div class="relative overflow-hidden -mx-6 -mt-6 p-6 mb-6 rounded-t-3xl bg-gradient-to-br from-slate-800 to-slate-900 border-b border-slate-700/50">
+        <div class="absolute -right-10 -top-10 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        
+        <div class="flex justify-between items-start relative z-10 mb-4">
+            <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-900/50 px-2 py-1 rounded">Профиль юзера</h3>
+            <button onclick="window.closeModal()" class="w-8 h-8 rounded-full bg-slate-800/80 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 transition-colors backdrop-blur-sm shadow-inner border border-slate-700"><i class="fas fa-times"></i></button>
+        </div>
+        
+        <div class="flex items-center space-x-4 relative z-10">
+           <div class="w-16 h-16 rounded-2xl ${u.status === 'banned' ? 'bg-red-500/20 border border-red-500/50 text-red-400' : 'bg-gradient-to-br from-teal-400 to-blue-500 text-white border-2 border-slate-700 shadow-[0_0_20px_rgba(45,212,191,0.3)]'} flex items-center justify-center font-black text-2xl shrink-0 transform -rotate-3 overflow-hidden">
+              ${u.status === 'banned' ? '<i class="fas fa-ban drop-shadow-md"></i>' : u.name.charAt(0)}
+           </div>
+           <div class="min-w-0 flex-1">
+              <h4 class="font-black text-white text-lg truncate tracking-tight">${u.name}</h4>
+              <p class="text-xs text-teal-400 truncate mt-0.5 font-medium">@${u.username}</p>
+           </div>
+        </div>
+      </div>
+
+      <div class="space-y-2.5 mb-6 text-sm px-1">
+         <div class="flex justify-between items-center bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/50 shadow-sm hover:border-slate-600 transition-colors">
+            <span class="text-slate-400 text-xs font-bold flex items-center"><i class="fas fa-id-badge w-5 text-center text-slate-500"></i> ID профиля</span>
+            <div class="flex items-center space-x-2">
+                <span class="text-white font-mono text-xs">${u.id}</span>
+                <button onclick="navigator.clipboard.writeText('${u.id}'); showToast('ID скопирован!')" class="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center text-teal-400 hover:text-white hover:bg-teal-500 transition-colors border border-slate-700 tap-effect shadow-inner"><i class="fas fa-copy text-[10px]"></i></button>
+            </div>
+         </div>
+         <div class="flex justify-between items-center bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/50 shadow-sm hover:border-slate-600 transition-colors">
+            <span class="text-slate-400 text-xs font-bold flex items-center"><i class="fas fa-wallet w-5 text-center text-teal-500/50"></i> Баланс</span>
+            <span class="text-teal-400 font-black text-sm drop-shadow-sm">${u.balance.toFixed(2)} <span class="text-[9px] font-bold text-teal-500">USDT</span></span>
+         </div>
+         <div class="flex justify-between items-center bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/50 shadow-sm hover:border-slate-600 transition-colors">
+            <span class="text-slate-400 text-xs font-bold flex items-center"><i class="fas fa-shield-alt w-5 text-center text-slate-500"></i> Статус</span>
+            <span class="px-2.5 py-1 rounded-md text-[9px] font-bold border ${statusColor} flex items-center uppercase tracking-wider shadow-inner"><i class="fas ${statusIcon} mr-1.5"></i>${statusText}</span>
+         </div>
+         <div class="flex justify-between items-center bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/50 shadow-sm hover:border-slate-600 transition-colors">
+            <span class="text-slate-400 text-xs font-bold flex items-center"><i class="fas fa-calendar-alt w-5 text-center text-slate-500"></i> Регистрация</span>
+            <span class="text-white text-[11px] font-medium font-mono bg-slate-900/50 px-2 py-1 rounded border border-slate-800">${u.joined || 'Неизвестно'}</span>
+         </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 px-1 pb-1">
+         <button onclick="window.openEditBalanceModal(${u.id})" class="py-3.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white rounded-xl font-bold text-xs tap-effect transition-colors shadow-sm group">
+            <i class="fas fa-pencil-alt mr-1.5 text-slate-400 group-hover:text-white transition-colors"></i> Изменить баланс
+         </button>
+         <button onclick="window.toggleUserBanFromModal(${u.id})" class="py-3.5 ${u.status === 'active' ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 shadow-red-500/10' : 'bg-green-500/10 text-green-400 border border-green-500/30 hover:bg-green-500/20 shadow-green-500/10'} rounded-xl font-bold text-xs tap-effect transition-colors shadow-sm">
+            <i class="fas ${u.status === 'active' ? 'fa-ban' : 'fa-check'} mr-1.5"></i> ${u.status === 'active' ? 'Забанить' : 'Разбанить'}
+         </button>
+      </div>
+    `;
+    
+    modalOverlay.classList.remove('hidden');
+    setTimeout(() => { 
+        modalOverlay.classList.remove('opacity-0'); 
+        modalContent.classList.remove('scale-95'); 
+        modalContent.classList.add('animate-pop-in'); 
+    }, 10);
+};
+
+window.toggleUserBanFromModal = async (uId) => {
+    uId = Number(uId);
+    await window.toggleUserBan(uId);
+    window.openUserDetailsModal(uId);
+};
+
 window.openEditBalanceModal = async (uId) => {
+    uId = Number(uId);
     triggerHaptic('medium');
     let uBalance = 0;
     let uName = "";
@@ -1618,15 +1894,14 @@ window.openEditBalanceModal = async (uId) => {
       <p class="text-xs text-slate-400 mb-4">Пользователь: <span class="text-white font-bold">${uName}</span></p>
       <input type="number" id="edit-balance-input" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none mb-6" value="${uBalance}" step="0.1">
       <div class="flex space-x-3">
-        <button onclick="window.closeModal()" class="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold text-sm tap-effect">Отмена</button>
+        <button onclick="window.openUserDetailsModal(${uId})" class="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold text-sm tap-effect">Назад</button>
         <button onclick="window.saveUserBalance(${uId})" class="flex-1 py-3 bg-teal-500 text-slate-900 rounded-xl font-bold text-sm shadow-lg shadow-teal-500/20 tap-effect">Сохранить</button>
       </div>
     `;
-    modalOverlay.classList.remove('hidden');
-    setTimeout(() => { modalOverlay.classList.remove('opacity-0'); modalContent.classList.remove('scale-95'); modalContent.classList.add('animate-pop-in'); }, 10);
 };
 
 window.saveUserBalance = async (uId) => {
+    uId = Number(uId);
     const newBalance = parseFloat(document.getElementById('edit-balance-input').value);
     if(isNaN(newBalance) || newBalance < 0) return showToast('Введите корректный баланс');
 
@@ -1646,29 +1921,34 @@ window.saveUserBalance = async (uId) => {
             }
         }
     }
-    window.closeModal();
     renderAdminTab('users');
+    window.openUserDetailsModal(uId);
     showToast('Баланс успешно изменен');
 };
 
 let adminUsersPage = 1;
 let adminUsersSearch = '';
 
+window.changeAdminUsersPage = (delta) => {
+  adminUsersPage += delta;
+  updateAdminUsersList();
+};
+
 function renderAdminUsers() {
   setTimeout(attachAdminUsersEvents, 0);
   return `
-    <div class="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-3 animate-slide-up">
+    <div class="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 animate-slide-up relative z-10">
       <div>
-        <h1 class="text-xl font-bold text-white mb-1">Пользователи</h1>
-        <p class="text-slate-400 text-xs">Управление базой</p>
+        <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Пользователи</h1>
+        <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Управление базой</p>
       </div>
-      <div class="relative w-full md:w-64">
-        <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 text-xs"></i>
-        <input type="text" id="admin-search-input" placeholder="Поиск по ID, имени или @username..." value="${\n          adminUsersSearch\n        }" class="w-full bg-slate-800 border border-slate-700 rounded-lg py-2 pl-9 pr-3 text-[11px] text-white focus:border-teal-500 outline-none transition-colors">
+      <div class="relative w-full md:w-72 group">
+        <div class="absolute inset-0 bg-teal-500/5 rounded-xl blur-md group-hover:bg-teal-500/10 transition-colors"></div>
+        <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-teal-500/50 text-sm z-10 group-focus-within:text-teal-400 transition-colors"></i>
+        <input type="text" id="admin-search-input" placeholder="Поиск по ID, имени или @username..." class="relative z-10 w-full bg-slate-900/80 backdrop-blur-md border border-slate-700/50 rounded-xl py-3 pl-11 pr-4 text-xs text-white focus:border-teal-400 outline-none transition-all shadow-inner placeholder-slate-500">
       </div>
     </div>
-    <div id="admin-users-container" class="animate-slide-up delay-75">
-      <!-- Injected via updateAdminUsersList -->
+    <div id="admin-users-container" class="animate-slide-up delay-75 relative z-10">
     </div>
   `;
 }
@@ -1676,6 +1956,7 @@ function renderAdminUsers() {
 function attachAdminUsersEvents() {
   const searchInput = document.getElementById('admin-search-input');
   if (searchInput) {
+    searchInput.value = adminUsersSearch;
     searchInput.addEventListener('input', (e) => {
       adminUsersSearch = e.target.value.toLowerCase();
       adminUsersPage = 1;
@@ -1683,18 +1964,10 @@ function attachAdminUsersEvents() {
     });
     if (adminUsersSearch) {
       searchInput.focus();
-      const val = searchInput.value;
-      searchInput.value = '';
-      searchInput.value = val;
     }
   }
   updateAdminUsersList();
 }
-
-window.changeAdminUsersPage = (delta) => {
-  adminUsersPage += delta;
-  updateAdminUsersList();
-};
 
 function updateAdminUsersList() {
   const container = document.getElementById('admin-users-container');
@@ -1718,62 +1991,53 @@ function updateAdminUsersList() {
 
   const currentUsers = filtered.slice((adminUsersPage - 1) * itemsPerPage, adminUsersPage * itemsPerPage);
 
-  let html = '<div class="space-y-2">';
-  
-  if (currentUsers.length === 0) {
-      html += '<div class="text-center py-6 bg-slate-850 rounded-xl border border-slate-800 text-slate-500 text-xs">Пользователи не найдены</div>';
-  }
+  let html = '<div class="space-y-2 pb-24">';
+      if (currentUsers.length === 0) {
+          html += '<div class="text-center py-6 bg-slate-800/40 backdrop-blur-md rounded-2xl border border-slate-700/50 text-slate-500 text-xs font-medium">Пользователи не найдены</div>';
+      }
 
-  currentUsers.forEach(u => {
-    html += \`
-      <div class="bg-slate-850 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between flex-wrap gap-2 hover:bg-slate-800/80 transition-colors ${u.id === currentUser.id ? 'border-teal-500/50 bg-teal-500/5' : ''}">
-        <div class="flex items-center space-x-2.5 min-w-[150px]">
-          <div class="w-7 h-7 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white text-[10px] relative shrink-0">
-            ${u.name.charAt(0)}
-            ${u.id === currentUser.id ? '<div class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-teal-500 rounded-full border border-slate-850"></div>' : ''}
-          </div>
-          <div class="min-w-0">
-            <p class="font-bold text-[11px] text-white truncate max-w-[120px]">${u.name} <span class="text-[9px] text-slate-500 font-normal ml-0.5">@${u.username}</span></p>
-            <p class="text-[8px] text-slate-500 mt-0.5">ID: ${u.id} • С ${u.joined}</p>
-          </div>
-        </div>
-        
-        <div class="flex items-center space-x-3 w-full md:w-auto justify-between md:justify-end">
-          <div class="text-left md:text-right flex items-center space-x-1.5">
-            <div>
-              <p class="text-[8px] text-slate-500 mb-0.5 uppercase tracking-wide">Баланс</p>
-              <p class="font-bold text-teal-400 text-[11px]">${u.balance.toFixed(2)}</p>
+      currentUsers.forEach(u => {
+        const statusBadge = u.status === 'banned' ? '<span class="px-1.5 py-0.5 rounded text-[8px] bg-red-500/20 text-red-400 border border-red-500/30 uppercase font-bold tracking-wider ml-2 shadow-inner">Бан</span>' : '';
+        html += `
+          <div onclick="window.openUserDetailsModal(${u.id})" class="bg-slate-800/40 backdrop-blur-md p-3.5 rounded-2xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-teal-500/40 hover:bg-slate-800/80 transition-all cursor-pointer tap-effect group ${u.id === currentUser.id ? 'border-teal-500/50 bg-teal-500/5' : ''}">
+            <div class="flex items-center space-x-3.5 min-w-0 w-full">
+              <div class="w-10 h-10 rounded-xl ${u.status === 'banned' ? 'bg-red-500/10 border border-red-500/30 text-red-400' : 'bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 text-white shadow-inner'} flex items-center justify-center font-bold text-sm relative shrink-0 group-hover:scale-105 transition-transform">
+                ${u.status === 'banned' ? '<i class="fas fa-ban"></i>' : u.name.charAt(0)}
+                ${u.id === currentUser.id ? '<div class="absolute -top-1 -right-1 w-3 h-3 bg-teal-400 rounded-full border-2 border-slate-900 shadow-[0_0_8px_rgba(45,212,191,0.8)]"></div>' : ''}
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="font-bold text-xs ${u.status === 'banned' ? 'text-slate-500 line-through' : 'text-white'} truncate flex items-center">${u.name} ${statusBadge}</p>
+                <p class="text-[10px] text-slate-400 mt-1 truncate font-mono">ID: ${u.id} ${u.username && u.username !== 'unknown' ? `<span class="text-[9px] text-slate-500 ml-1 bg-slate-900/80 px-1 rounded">@${u.username}</span>` : ''}</p>
+              </div>
+              <div class="text-right shrink-0 flex flex-col justify-center items-end mr-3">
+                <p class="font-black text-teal-400 text-sm drop-shadow-sm">${u.balance.toFixed(2)}</p>
+                <p class="text-[8px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">USDT</p>
+              </div>
+              <div class="w-6 h-6 rounded-full bg-slate-900 flex items-center justify-center text-slate-500 group-hover:text-teal-400 group-hover:bg-teal-500/10 transition-colors shrink-0">
+                <i class="fas fa-chevron-right text-[10px]"></i>
+              </div>
             </div>
-            <button onclick="window.openEditBalanceModal(${u.id})" class="w-6 h-6 rounded bg-slate-800 hover:bg-teal-500/20 text-slate-400 hover:text-teal-400 transition-colors tap-effect text-[10px] mt-2 md:mt-0" title="Изменить баланс"><i class="fas fa-pencil-alt"></i></button>
           </div>
-          <div class="flex items-center space-x-1.5">
-            ${u.status === 'active' 
-              ? '<span class="px-1.5 py-0.5 bg-green-500/10 text-green-400 text-[8px] rounded border border-green-500/20">Активен</span><button onclick="toggleUserBan(' + u.id + ')" class="w-6 h-6 rounded bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors tap-effect text-[10px]" title="Забанить"><i class="fas fa-ban"></i></button>' 
-              : '<span class="px-1.5 py-0.5 bg-red-500/10 text-red-400 text-[8px] rounded border border-red-500/20">Бан</span><button onclick="toggleUserBan(' + u.id + ')" class="w-6 h-6 rounded bg-slate-800 hover:bg-green-500/20 text-slate-400 hover:text-green-400 transition-colors tap-effect text-[10px]" title="Разбанить"><i class="fas fa-check"></i></button>'
-            }
+        `;
+      });
+      html += '</div>';
+
+      if (totalPages > 1) {
+        html += `
+          <div class="flex items-center justify-between mt-4 px-1 pb-6 relative z-10">
+            <button onclick="window.changeAdminUsersPage(-1)" class="px-4 py-2 bg-slate-800 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect border border-slate-700 shadow-sm" ${adminUsersPage <= 1 ? 'disabled' : ''}>
+              <i class="fas fa-chevron-left mr-1.5"></i> Назад
+            </button>
+            <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">Стр. ${adminUsersPage} из ${totalPages}</span>
+            <button onclick="window.changeAdminUsersPage(1)" class="px-4 py-2 bg-slate-800 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect border border-slate-700 shadow-sm" ${adminUsersPage >= totalPages ? 'disabled' : ''}>
+              Вперед <i class="fas fa-chevron-right ml-1.5"></i>
+            </button>
           </div>
-        </div>
-      </div>
-    \`;
-  });
-  html += '</div>';
-
-  if (totalPages > 1) {
-    html += \`
-      <div class="flex items-center justify-between mt-3 px-1">
-        <button onclick="window.changeAdminUsersPage(-1)" class="px-3 py-1.5 bg-slate-800 rounded-lg text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${adminUsersPage <= 1 ? 'disabled' : ''}>
-          <i class="fas fa-chevron-left mr-1"></i> Назад
-        </button>
-        <span class="text-[10px] text-slate-500 font-medium">Стр. ${adminUsersPage} из ${totalPages}</span>
-        <button onclick="window.changeAdminUsersPage(1)" class="px-3 py-1.5 bg-slate-800 rounded-lg text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect" ${adminUsersPage >= totalPages ? 'disabled' : ''}>
-          Вперед <i class="fas fa-chevron-right ml-1"></i>
-        </button>
-      </div>
-    \`;
-  }
-
-  container.innerHTML = html;
+        `;
+      }
+      container.innerHTML = html;
 }
+
 window.openAdminTaskModal = (taskId = null) => {
     triggerHaptic('medium');
     let task = taskId ? state.tasks.find(t => t.id === taskId) : { id: 't'+Date.now(), title: '', reward: 1.0, icon: 'fa-telegram', type: 'tg', url: '' };
@@ -1807,7 +2071,14 @@ window.openAdminTaskModal = (taskId = null) => {
              </div>
              <div class="col-span-2">
                 <label class="text-xs text-slate-400 mb-1 block">Иконка (класс FontAwesome)</label>
-                <input type="text" id="admin-task-icon" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.icon}" placeholder="fa-telegram">\n             </div>\n             <div class="col-span-2">\n                <label class="text-xs text-slate-400 mb-1 block">Лимит выполнений (0 = безлимит)</label>\n                <input type="number" id="admin-task-max" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.maxUses || 0}" min="0">\n             </div>\n         </div>\n      </div>
+                <input type="text" id="admin-task-icon" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.icon}" placeholder="fa-telegram">
+             </div>
+             <div class="col-span-2">
+                <label class="text-xs text-slate-400 mb-1 block">Лимит выполнений (0 = безлимит)</label>
+                <input type="number" id="admin-task-max" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none" value="${task.maxUses || 0}" min="0">
+             </div>
+         </div>
+      </div>
       <div class="flex space-x-3">
          <button onclick="window.closeModal()" class="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold text-sm tap-effect">Отмена</button>
          <button onclick="window.saveAdminTask()" class="flex-1 py-3 bg-teal-500 text-slate-900 rounded-xl font-bold text-sm shadow-lg shadow-teal-500/20 tap-effect">Сохранить</button>
@@ -1827,9 +2098,14 @@ window.saveAdminTask = () => {
     const reward = parseFloat(document.getElementById('admin-task-reward').value);
     const icon = document.getElementById('admin-task-icon').value.trim();
     const url = document.getElementById('admin-task-url').value.trim();
-    const type = document.getElementById('admin-task-type').value;\n    const maxUses = parseInt(document.getElementById('admin-task-max').value) || 0;\n\n    if(!title || !url) { showToast('Заполните название и ссылку'); return; }
+    const type = document.getElementById('admin-task-type').value;
+    const maxUses = parseInt(document.getElementById('admin-task-max').value) || 0;
 
-    const existingIdx = state.tasks.findIndex(t => t.id === id);\n    const currentUses = existingIdx >= 0 ? (state.tasks[existingIdx].currentUses || 0) : 0;\n    const taskData = { id, title, reward, icon, url, type, maxUses, currentUses, status: 'todo' };
+    if(!title || !url) { showToast('Заполните название и ссылку'); return; }
+
+    const existingIdx = state.tasks.findIndex(t => t.id === id);
+    const currentUses = existingIdx >= 0 ? (state.tasks[existingIdx].currentUses || 0) : 0;
+    const taskData = { id, title, reward, icon, url, type, maxUses, currentUses, status: 'todo' };
 
     if(existingIdx >= 0) {
         taskData.status = state.tasks[existingIdx].status;
@@ -1854,7 +2130,7 @@ window.deleteAdminTask = (id) => {
 };
 
 function renderAdminTasks() {
-  return `
+  let html = `
     <div class="mb-5 flex justify-between items-center animate-slide-up">
       <div>
         <h1 class="text-xl font-bold text-white mb-1">Задания</h1>
@@ -1865,8 +2141,14 @@ function renderAdminTasks() {
       </button>
     </div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 animate-slide-up delay-75">
-      ${state.tasks.length === 0 ? '<p class="text-slate-500 text-xs">Заданий пока нет.</p>' : ''}
-      ${state.tasks.map(t => `
+  `;
+
+  if (state.tasks.length === 0) {
+     html += '<p class="text-slate-500 text-xs">Заданий пока нет.</p>';
+  }
+
+  state.tasks.forEach(t => {
+     html += `
         <div class="bg-slate-850 p-4 rounded-xl border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-colors">
           <div class="flex items-start justify-between mb-3">
             <div class="flex items-center space-x-3">
@@ -1885,10 +2167,16 @@ function renderAdminTasks() {
           </div>
           <div class="bg-slate-900 rounded-lg p-2 flex items-center justify-between border border-slate-800/50">
             <span class="text-[10px] text-slate-500 truncate mr-2 font-mono">${t.url}</span>
-            <div class="flex items-center space-x-2">\n              <span class="text-[9px] text-slate-400"><i class="fas fa-users mr-1"></i>${t.currentUses || 0}/${t.maxUses || '∞'}</span>\n              <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase">${t.type}</span>\n            </div>\n          </div>\n        </div>
-      `).join('')}
-    </div>
-  `;
+            <div class="flex items-center space-x-2">
+              <span class="text-[9px] text-slate-400"><i class="fas fa-users mr-1"></i>${t.currentUses || 0}/${t.maxUses || '∞'}</span>
+              <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase">${t.type}</span>
+            </div>
+          </div>
+        </div>
+     `;
+  });
+  html += '</div>';
+  return html;
 }
 
 window.processDeposit = async (dId, action) => {
@@ -2042,19 +2330,21 @@ function renderAdminFinances() {
 window.saveAdminSettings = () => {
   const minWith = parseFloat(document.getElementById('set-min-with').value);
   const mRate = parseFloat(document.getElementById('set-mining-rate').value);
+  const maxHrs = parseFloat(document.getElementById('set-max-mining-hours').value);
   const uCost = parseFloat(document.getElementById('set-upgrade-cost').value);
   const refFix = parseFloat(document.getElementById('set-ref-fixed').value);
   const refPercent = parseFloat(document.getElementById('set-ref-bonus').value);
   const tonWallet = document.getElementById('set-ton-wallet').value.trim();
   const maintenance = document.getElementById('set-maintenance').checked;
 
-  if(isNaN(minWith) || isNaN(mRate) || isNaN(uCost) || isNaN(refFix) || isNaN(refPercent)) {
+  if(isNaN(minWith) || isNaN(mRate) || isNaN(maxHrs) || isNaN(uCost) || isNaN(refFix) || isNaN(refPercent)) {
       showToast('Введите корректные числа');
       return;
   }
 
   state.settings.minWithdrawal = minWith;
   state.settings.miningRatePerHour = mRate;
+  state.settings.maxMiningTimeHours = maxHrs;
   state.settings.upgradeBaseCost = uCost;
   state.settings.refBonusFixed = refFix;
   state.settings.refBonusPercent = refPercent;
@@ -2071,102 +2361,163 @@ window.saveAdminSettings = () => {
 function renderAdminSettings() {
   const settings = state.settings;
   const mRate = settings.miningRatePerHour !== undefined ? settings.miningRatePerHour : 0.01;
+  const maxHrs = settings.maxMiningTimeHours !== undefined ? settings.maxMiningTimeHours : 24;
   const uCost = settings.upgradeBaseCost !== undefined ? settings.upgradeBaseCost : 5;
   const refFix = settings.refBonusFixed !== undefined ? settings.refBonusFixed : 0.1;
   const refPercent = settings.refBonusPercent !== undefined ? settings.refBonusPercent : 10;
   const tonWallet = settings.tonWallet || '';
 
   return `
-    <div class="mb-5 animate-slide-up">
-      <h1 class="text-xl font-bold text-white mb-1">Настройки</h1>
-      <p class="text-slate-400 text-xs">Глобальные параметры системы</p>
+    <div class="mb-6 animate-slide-up relative z-10">
+      <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Настройки</h1>
+      <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Управление экономикой и системой</p>
     </div>
 
-    <div class="max-w-xl bg-slate-850 rounded-xl border border-slate-800 p-4 space-y-4 animate-slide-up delay-75">
+    <div class="space-y-5 animate-slide-up delay-75 pb-20 relative z-10">
       
-      <div>
-        <label class="block text-xs font-bold text-slate-300 mb-1">Базовая добыча USDT в час</label>
-        <p class="text-[10px] text-slate-500 mb-1.5">Сколько дает 1-й уровень.</p>
-        <input type="number" id="set-mining-rate" value="${mRate}" step="0.001" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-teal-500 outline-none">
+      <!-- Mining & Upgrades -->
+      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-teal-500/50 transition-all duration-300">
+         <div class="absolute -right-10 -top-10 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors"></div>
+         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-hammer text-teal-400 mr-2"></i>Майнинг и Улучшения</h2>
+         
+         <div class="space-y-4 relative z-10">
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Базовая добыча (USDT/ч)</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-bolt absolute left-3.5 text-slate-500"></i>
+                <input type="number" id="set-mining-rate" value="${mRate}" step="0.001" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner">
+              </div>
+            </div>
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Хранилище: Макс. время майнинга (Часов)</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-hourglass-half absolute left-3.5 text-slate-500"></i>
+                <input type="number" id="set-max-mining-hours" value="${maxHrs}" step="1" min="1" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner">
+              </div>
+            </div>
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Базовая цена апгрейда (USDT)</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-arrow-up absolute left-3.5 text-slate-500"></i>
+                <input type="number" id="set-upgrade-cost" value="${uCost}" step="0.5" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner">
+              </div>
+            </div>
+         </div>
       </div>
 
-      <div>
-        <label class="block text-xs font-bold text-slate-300 mb-1">Базовая стоимость улучшения (USDT)</label>
-        <p class="text-[10px] text-slate-500 mb-1.5">Цена апгрейда с 1 на 2 уровень.</p>
-        <input type="number" id="set-upgrade-cost" value="${uCost}" step="0.5" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-teal-500 outline-none">
+      <!-- Referral System -->
+      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-blue-500/50 transition-all duration-300">
+         <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/20 transition-colors"></div>
+         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-users text-blue-400 mr-2"></i>Реферальная система</h2>
+         
+         <div class="grid grid-cols-2 gap-3 relative z-10">
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Фикс. бонус</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-gift absolute left-3.5 text-slate-500"></i>
+                <input type="number" id="set-ref-fixed" value="${refFix}" step="0.01" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-9 pr-2 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+              </div>
+            </div>
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Процент (%)</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-percent absolute left-3.5 text-slate-500"></i>
+                <input type="number" id="set-ref-bonus" value="${refPercent}" step="1" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-9 pr-2 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
+              </div>
+            </div>
+         </div>
       </div>
 
-      <div class="pt-3 border-t border-slate-800">
-        <label class="block text-xs font-bold text-slate-300 mb-1">Фикс. бонус за реферала (USDT)</label>
-        <input type="number" id="set-ref-fixed" value="${refFix}" step="0.01" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-teal-500 outline-none">
+      <!-- Finances & Wallets -->
+      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-green-500/50 transition-all duration-300">
+         <div class="absolute -right-10 -top-10 w-32 h-32 bg-green-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-green-500/20 transition-colors"></div>
+         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-wallet text-green-400 mr-2"></i>Финансы и Выплаты</h2>
+         
+         <div class="space-y-4 relative z-10">
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Мин. сумма вывода (USDT)</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-money-bill-wave absolute left-3.5 text-slate-500"></i>
+                <input type="number" id="set-min-with" value="${settings.minWithdrawal}" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-green-500 focus:ring-1 focus:ring-green-500/50 outline-none transition-all shadow-inner">
+              </div>
+            </div>
+            <div class="relative">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Кошелек TON (Tonkeeper)</label>
+              <div class="relative flex items-center">
+                <i class="fas fa-link absolute left-3.5 text-slate-500"></i>
+                <input type="text" id="set-ton-wallet" value="${tonWallet}" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white font-mono focus:border-green-500 focus:ring-1 focus:ring-green-500/50 outline-none transition-all shadow-inner" placeholder="EQ...">
+              </div>
+            </div>
+         </div>
       </div>
 
-      <div>
-        <label class="block text-xs font-bold text-slate-300 mb-1">Реферальный бонус (%)</label>
-        <input type="number" id="set-ref-bonus" value="${refPercent}" step="1" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-teal-500 outline-none">
+      <!-- System -->
+      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-orange-500/50 transition-all duration-300">
+         <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-orange-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-orange-500/20 transition-colors"></div>
+         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-cogs text-orange-400 mr-2"></i>Система</h2>
+         
+         <div class="flex items-center justify-between p-4 bg-slate-900/80 rounded-2xl border border-slate-700 relative z-10">
+           <div>
+             <p class="font-bold text-white text-sm mb-0.5">Техническое обслуживание</p>
+             <p class="text-[10px] text-slate-500">Закрыть доступ для всех юзеров</p>
+           </div>
+           <label class="relative inline-flex items-center cursor-pointer tap-effect">
+             <input type="checkbox" id="set-maintenance" class="sr-only peer" ${settings.maintenanceMode ? 'checked' : ''}>
+             <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500 shadow-inner"></div>
+           </label>
+         </div>
       </div>
 
-      <div class="pt-3 border-t border-slate-800">
-        <label class="block text-xs font-bold text-slate-300 mb-1">Мин. сумма вывода (USDT)</label>
-        <input type="number" id="set-min-with" value="${settings.minWithdrawal}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-teal-500 outline-none">
-      </div>
-
-      <div class="pt-3 border-t border-slate-800">
-        <h3 class="font-bold text-white mb-2 text-sm">Методы пополнения</h3>
-        <div class="mb-3">
-          <label class="block text-[11px] font-bold text-slate-300 mb-1">Кошелек TON (Tonkeeper)</label>
-          <input type="text" id="set-ton-wallet" value="${tonWallet}" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-teal-500 outline-none" placeholder="EQ...">
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between p-3 bg-slate-900 rounded-lg border border-slate-700 mt-2">
-        <div>
-          <p class="font-bold text-white text-xs mb-0.5">Тех. обслуживание</p>
-          <p class="text-[10px] text-slate-500">Закрыть доступ для пользователей</p>
-        </div>
-        <label class="relative inline-flex items-center cursor-pointer">
-          <input type="checkbox" id="set-maintenance" class="sr-only peer" ${settings.maintenanceMode ? 'checked' : ''}>
-          <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-500"></div>
-        </label>
-      </div>
-
-      <button onclick="window.saveAdminSettings()" class="w-full py-3 bg-teal-500 text-white font-extrabold text-sm rounded-xl hover:bg-teal-400 transition-colors shadow-lg shadow-teal-500/20 tap-effect mt-4 mb-6">
-        Сохранить изменения
+      <button onclick="window.saveAdminSettings()" class="w-full py-4 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white font-black text-sm rounded-2xl shadow-[0_10px_25px_rgba(20,184,166,0.3)] tap-effect border border-teal-400/50 uppercase tracking-wide group relative overflow-hidden">
+         <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
+         <span class="relative z-10 flex items-center justify-center"><i class="fas fa-save mr-2"></i>Сохранить изменения</span>
       </button>
 
-      <!-- Promo Codes Section -->
-      <div class="pt-4 border-t border-slate-800 animate-slide-up delay-150">
-        <div class="flex justify-between items-center mb-3">
-          <div>
-            <h3 class="font-bold text-white text-sm">Промокоды</h3>
-            <p class="text-[10px] text-slate-500">Бонусные коды для игроков</p>
-          </div>
-          <button onclick="window.openPromoModal()" class="bg-teal-500 text-white px-2.5 py-1.5 rounded-lg font-bold text-[11px] hover:bg-teal-400 transition-colors shadow-lg shadow-teal-500/20 tap-effect">
-            <i class="fas fa-plus mr-1"></i>Создать
-          </button>
-        </div>
-        <div class="space-y-2">
-          ${(!state.admin.promoCodes || state.admin.promoCodes.length === 0) ? '<p class="text-[11px] text-slate-500 bg-slate-900 p-3 rounded-lg border border-slate-700 text-center">Нет созданных промокодов</p>' : ''}
-          ${(state.admin.promoCodes || []).map(p => `
-            <div class="bg-slate-900 p-2.5 rounded-lg border border-slate-700 flex justify-between items-center hover:border-slate-600 transition-colors">
-              <div>
-                <p class="font-bold text-teal-400 text-xs font-mono">${p.code}</p>
-                <p class="text-[9px] text-slate-400 mt-0.5">Награда: <span class="text-white">${p.reward} USDT</span> • Использований: <span class="text-white">${p.currentUses}/${p.maxUses || '∞'}</span></p>
-              </div>
-              <button onclick="window.deletePromo('${p.code}')" class="text-slate-500 hover:text-red-400 p-1.5 transition-colors tap-effect text-xs"><i class="fas fa-trash"></i></button>
-            </div>
-          `).join('')}
-        </div>
+      <!-- Promocodes -->
+      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-pink-500/50 transition-all duration-300">
+         <div class="absolute -right-10 -bottom-10 w-32 h-32 bg-pink-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-pink-500/20 transition-colors"></div>
+         
+         <div class="flex justify-between items-center mb-5 relative z-10">
+           <div>
+             <h2 class="text-sm font-bold text-white flex items-center"><i class="fas fa-ticket-alt text-pink-400 mr-2"></i>Промокоды</h2>
+             <p class="text-[10px] text-slate-400 mt-1">Раздача бонусов</p>
+           </div>
+           <button onclick="window.openPromoModal()" class="bg-pink-500/20 text-pink-400 border border-pink-500/30 px-3 py-2 rounded-xl font-bold text-[11px] hover:bg-pink-500 hover:text-white transition-all shadow-lg tap-effect flex items-center">
+             <i class="fas fa-plus mr-1.5"></i>Создать
+           </button>
+         </div>
+
+         <div class="space-y-3 relative z-10">
+           ${(!state.admin.promoCodes || state.admin.promoCodes.length === 0) ? '<div class="text-[11px] text-slate-500 bg-slate-900/80 p-5 rounded-2xl border border-slate-700/50 text-center border-dashed font-medium">Нет активных промокодов</div>' : ''}
+           ${(state.admin.promoCodes || []).map(p => `
+             <div class="bg-slate-900/80 p-3.5 rounded-2xl border border-slate-700/50 flex justify-between items-center hover:border-pink-500/40 transition-colors shadow-sm">
+               <div class="flex items-center space-x-3.5">
+                 <div class="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400 border border-pink-500/20 shadow-inner">
+                   <i class="fas fa-gift"></i>
+                 </div>
+                 <div>
+                   <p class="font-bold text-white text-sm font-mono tracking-wider">${p.code}</p>
+                   <p class="text-[9px] text-slate-400 mt-1">Награда: <span class="text-teal-400 font-bold">${p.reward} USDT</span> <span class="mx-1 opacity-50">•</span> Выдано: <span class="text-white">${p.currentUses}/${p.maxUses || '∞'}</span></p>
+                 </div>
+               </div>
+               <button onclick="window.deletePromo('${p.code}')" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-500 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 border border-transparent flex items-center justify-center transition-all tap-effect shrink-0">
+                 <i class="fas fa-trash text-xs"></i>
+               </button>
+             </div>
+           `).join('')}
+         </div>
       </div>
 
       <!-- Danger Zone -->
-      <div class="pt-5 mt-2 border-t border-slate-800 animate-slide-up delay-225">
-        <h3 class="font-bold text-red-500 mb-3 text-sm flex items-center"><i class="fas fa-exclamation-triangle mr-2"></i> Опасная зона</h3>
-        <button onclick="window.resetTotalPaid()" class="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 font-bold text-xs rounded-xl transition-colors tap-effect shadow-sm">
-          Обнулить статистику "Выплачено" в Дашборде
-        </button>
+      <div class="bg-red-900/10 backdrop-blur-xl rounded-3xl p-5 border border-red-500/20 shadow-xl relative overflow-hidden group hover:border-red-500/40 transition-all duration-300">
+         <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-red-500/10 rounded-full blur-3xl pointer-events-none"></div>
+         <h2 class="text-sm font-bold text-red-500 mb-4 flex items-center relative z-10"><i class="fas fa-exclamation-triangle mr-2"></i>Опасная зона</h2>
+         
+         <button onclick="window.resetTotalPaid()" class="w-full relative z-10 py-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 font-bold text-xs rounded-xl transition-all tap-effect shadow-sm flex items-center justify-center">
+           <i class="fas fa-skull mr-2"></i>Обнулить статистику "Выплачено"
+         </button>
       </div>
-
+      
     </div>
   `;
 }
