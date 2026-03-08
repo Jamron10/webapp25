@@ -9,7 +9,7 @@ require('dotenv').config();
 // ==========================================
 const BOT_TOKEN = process.env.BOT_TOKEN || '8530910919:AAHVlnRDNQwgirNx0OgeA6ST4NRm9GPQ-aA'; 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tetherflow';
-const WEB_APP_URL = process.env.WEB_APP_URL || 'https://t.me/JamronCasinoBot/app'; // Замените на ссылку Web App
+const WEB_APP_URL = process.env.WEB_APP_URL || 'https://webapp25.onrender.com'; // Замените на ссылку Web App
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
@@ -143,4 +143,5 @@ bot.launch().then(() => {
 
 // Плавная остановка
 process.once('SIGINT', () => bot.stop('SIGINT'));
+
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
