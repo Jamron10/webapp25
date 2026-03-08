@@ -19,14 +19,14 @@
 
 /* Neon utilities */
 .neon-glow {
-  box-shadow: 0 0 20px rgba(45, 212, 191, 0.4);
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4); /* purple */
 }
 .neon-glow:active {
-  box-shadow: 0 0 30px rgba(45, 212, 191, 0.8);
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.8);
 }
 
 .neon-text {
-  text-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.7);
 }
 
 /* Skeleton Loading Animation */
@@ -41,35 +41,71 @@
   100% { background-position: -200% 0; }
 }
 
-/* Tab Transitions */
+/* Smooth Animations */
 .fade-in {
-  animation: fadeIn 0.3s ease-in-out;
+  animation: fadeIn 0.4s ease-out forwards;
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(15px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+.animate-slide-up {
+  opacity: 0;
+  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.9); }
+  50% { transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-pop-in {
+  animation: popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Animation Delays */
+.delay-75 { animation-delay: 75ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-225 { animation-delay: 225ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+
 /* Tap Effect */
 .tap-effect {
-  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s, box-shadow 0.2s;
 }
 .tap-effect:active {
-  transform: scale(0.92);
+  transform: scale(0.94);
 }
 
-/* Progress bar animation */
-.progress-bar-fill {
-  transition: width 0.3s ease-out;
-}
-
-/* Floating Animation for Main Button */
+/* Floating Animation */
 @keyframes float {
   0% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+  50% { transform: translateY(-8px); }
   100% { transform: translateY(0px); }
 }
 .float-anim {
   animation: float 4s ease-in-out infinite;
+}
+
+/* Slow Spin for Miner */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 12s linear infinite;
+}
+
+/* Shimmer Effect for Buttons */
+@keyframes shimmer {
+  100% { transform: translateX(100%) skewX(-12deg); }
 }
