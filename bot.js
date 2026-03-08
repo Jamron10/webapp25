@@ -7,9 +7,9 @@ require('dotenv').config();
 // ==========================================
 // НАСТРОЙКИ
 // ==========================================
-const BOT_TOKEN = process.env.BOT_TOKEN || '8530910919:AAHKTVl9ilPFCG5SudrhI38Xl8PYsVeK7VE'; 
+const BOT_TOKEN = process.env.BOT_TOKEN || 'ВАШ_ТОКЕН_БОТА'; 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tetherflow';
-const WEB_APP_URL = process.env.WEB_APP_URL || 'https://webapp25.onrender.com'; // Замените на ссылку Web App
+const WEB_APP_URL = process.env.WEB_APP_URL || 'https://webapp26.onrender.com/'; // Замените на ссылку Web App
 const PORT = process.env.PORT || 3000;
 
 // ==========================================
@@ -34,6 +34,11 @@ const User = mongoose.model('User', UserSchema);
 const app = express();
 app.use(cors()); // Разрешаем CORS для запросов из Web App
 app.use(express.json({ limit: '50mb' })); // Увеличиваем лимит для больших объектов состояния
+
+// Проверка работоспособности сервера (для Render и браузера)
+app.get('/', (req, res) => {
+  res.send('✅ API Сервер TetherFlow успешно работает!');
+});
 
 // Получить одного пользователя
 app.get('/api/users/:id', async (req, res) => {
@@ -143,6 +148,4 @@ bot.launch().then(() => {
 
 // Плавная остановка
 process.once('SIGINT', () => bot.stop('SIGINT'));
-
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
