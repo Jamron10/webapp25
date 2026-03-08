@@ -1,0 +1,75 @@
+/* Hide scrollbar for Chrome, Safari and Opera */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+#admin-nav-desktop::-webkit-scrollbar, #admin-content-area::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* Safe area for iOS bottom bar */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+
+/* Neon utilities */
+.neon-glow {
+  box-shadow: 0 0 20px rgba(45, 212, 191, 0.4);
+}
+.neon-glow:active {
+  box-shadow: 0 0 30px rgba(45, 212, 191, 0.8);
+}
+
+.neon-text {
+  text-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
+}
+
+/* Skeleton Loading Animation */
+.skeleton {
+  animation: skeleton-loading 1.5s infinite linear;
+  background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+  background-size: 200% 100%;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Tab Transitions */
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Tap Effect */
+.tap-effect {
+  transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tap-effect:active {
+  transform: scale(0.92);
+}
+
+/* Progress bar animation */
+.progress-bar-fill {
+  transition: width 0.3s ease-out;
+}
+
+/* Floating Animation for Main Button */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+.float-anim {
+  animation: float 4s ease-in-out infinite;
+}
