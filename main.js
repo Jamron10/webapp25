@@ -243,6 +243,12 @@ async function loadState(tgData) {
       }
 
       state.user = { ...state.user, ...dbData.user };
+      state.user.activeSkin = state.user.activeSkin || 'default';
+      state.user.unlockedSkins = state.user.unlockedSkins || ['default'];
+      state.user.achievements = state.user.achievements || [];
+      state.user.staking = state.user.staking || [];
+      state.user.squadId = state.user.squadId || null;
+      if (!state.squads) state.squads = [];
       state.tasks = globalTasks || dbData.tasks || state.tasks;
       state.friends = dbData.friends || [];
       state.withdrawals = dbData.withdrawals || [];
@@ -576,6 +582,8 @@ function renderTab(tab) {
 // ==========================================
 function renderHome() {
   if (state.user.uncollected === undefined) state.user.uncollected = 0;
+  const activeSkinId = state.user.activeSkin || 'default';
+  const skin = (window.SKINS && window.SKINS.find(s => s.id === activeSkinId)) || { id: 'default', name: 'Оригинал', cost: 0, icon: 'fa-dharmachakra', colors: 'from-slate-800 to-slate-900', ring: 'border-t-teal-400', iconColor: 'text-teal-400' };
   const avatar = currentUser.photo_url 
     ? `<img src="${currentUser.photo_url}" class="w-full h-full object-cover" alt="Avatar">` 
     : (currentUser.first_name.charAt(0) + (currentUser.last_name ? currentUser.last_name.charAt(0) : ''));
@@ -589,6 +597,19 @@ function renderHome() {
       <div class="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
          <div class="absolute -top-[10%] -left-[10%] w-[60%] h-[40%] bg-teal-500/10 rounded-full blur-[80px] animate-pulse"></div>
          <div class="absolute top-[40%] -right-[20%] w-[60%] h-[40%] bg-blue-600/10 rounded-full blur-[100px]"></div>
+      </div>
+
+      <!-- Live Feed Marquee -->
+      <div class="w-full bg-slate-900/80 border-b border-slate-800/50 py-1.5 px-4 mb-3 shrink-0 overflow-hidden relative z-10 flex items-center shadow-sm rounded-lg">
+        <i class="fas fa-broadcast-tower text-teal-400 text-[10px] mr-2 animate-pulse"></i>
+        <div class="flex-1 overflow-hidden relative h-4">
+          <div class="absolute whitespace-nowrap text-[9px] text-slate-400 font-medium animate-[marquee_15s_linear_infinite]" id="live-feed">
+            <span class="mx-4"><span class="text-white">@alex***</span> вывел <span class="text-teal-400 font-bold">15.50 USDT</span></span>
+            <span class="mx-4"><span class="text-white">@kris***</span> вывел <span class="text-teal-400 font-bold">5.00 USDT</span></span>
+            <span class="mx-4"><span class="text-white">@max***</span> вывел <span class="text-teal-400 font-bold">42.10 USDT</span></span>
+            <span class="mx-4"><span class="text-white">@ivan***</span> вывел <span class="text-teal-400 font-bold">11.00 USDT</span></span>
+          </div>
+        </div>
       </div>
 
       <!-- Profile widget top-left -->
@@ -610,14 +631,14 @@ function renderHome() {
           <div class="absolute w-64 h-64 rounded-full border border-dashed border-slate-600/40 pointer-events-none" style="animation: spin-slow 25s linear infinite;"></div>
           
           <!-- Middle Accent Ring -->
-          <div class="absolute w-56 h-56 rounded-full border border-teal-500/20 border-t-teal-400 pointer-events-none shadow-[0_0_15px_rgba(45,212,191,0.1)]" style="animation: spin-slow 15s linear infinite reverse;"></div>
+          <div class="absolute w-56 h-56 rounded-full border border-slate-700/50 ${skin.ring} pointer-events-none shadow-[0_0_15px_rgba(45,212,191,0.1)]" style="animation: spin-slow 15s linear infinite reverse;"></div>
           
           <!-- Core Miner Container -->
-          <div class="relative z-10 w-48 h-48 rounded-full bg-gradient-to-b from-slate-800 to-slate-900 border-[4px] border-slate-700 shadow-[0_0_50px_rgba(20,184,166,0.15),inset_0_0_20px_rgba(0,0,0,0.8)] flex flex-col items-center justify-center overflow-hidden group">
+          <div class="relative z-10 w-48 h-48 rounded-full bg-gradient-to-b ${skin.colors} border-[4px] border-slate-700 shadow-[0_0_50px_rgba(20,184,166,0.15),inset_0_0_20px_rgba(0,0,0,0.8)] flex flex-col items-center justify-center overflow-hidden group">
             
             <!-- Inner Animated Core -->
             <div class="absolute inset-0 flex items-center justify-center opacity-30">
-              <i class="fas fa-dharmachakra text-[10rem] text-teal-400" style="animation: spin-slow 10s linear infinite;"></i>
+              <i class="fas ${skin.icon} text-[10rem] ${skin.iconColor}" style="animation: spin-slow 10s linear infinite;"></i>
             </div>
             
             <!-- Gradient Overlay -->
@@ -665,11 +686,16 @@ function renderHome() {
           </div>
         </div>
         
-        <button id="upgrade-btn" class="w-full py-3 bg-slate-900/80 hover:bg-slate-800 text-white rounded-xl font-bold text-xs transition-colors tap-effect flex justify-center items-center border border-slate-600/50 shadow-inner disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden" ${state.user.level >= 10 ? 'disabled' : ''}>
-          ${state.user.level >= 10 
-            ? '<span><i class="fas fa-star text-yellow-400 mr-1 group-hover:scale-110 transition-transform"></i> Макс. мощность</span>' 
-            : `<span class="relative z-10 flex items-center"><i class="fas fa-arrow-up text-teal-400 mr-1.5"></i> Улучшить оборудование</span> <span class="relative z-10 bg-teal-500/20 px-2 py-1 rounded-md text-teal-300 text-[10px] ml-2 border border-teal-500/30 shadow-sm group-hover:bg-teal-500/30 transition-colors">${getUpgradeCost(state.user.level)} USDT</span>`}
-        </button>
+        <div class="flex space-x-2">
+          <button id="upgrade-btn" class="flex-1 py-3 bg-slate-900/80 hover:bg-slate-800 text-white rounded-xl font-bold text-[11px] transition-colors tap-effect flex justify-center items-center border border-slate-600/50 shadow-inner disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden" ${state.user.level >= 10 ? 'disabled' : ''}>
+            ${state.user.level >= 10 
+              ? '<span><i class="fas fa-star text-yellow-400 mr-1 group-hover:scale-110 transition-transform"></i> Макс. уровень</span>' 
+              : `<span class="relative z-10 flex items-center"><i class="fas fa-arrow-up text-teal-400 mr-1"></i> Улучшить</span> <span class="relative z-10 bg-teal-500/20 px-1.5 py-0.5 rounded text-teal-300 text-[9px] ml-1.5 border border-teal-500/30 shadow-sm">${getUpgradeCost(state.user.level)} USDT</span>`}
+          </button>
+          <button onclick="window.openSkinsModal()" class="w-12 shrink-0 py-3 bg-slate-900/80 hover:bg-slate-800 text-pink-400 rounded-xl font-bold transition-colors tap-effect flex justify-center items-center border border-slate-600/50 shadow-inner group">
+            <i class="fas fa-paint-brush group-hover:scale-110 transition-transform"></i>
+          </button>
+        </div>
       </div>
     </div>
   `;
@@ -780,7 +806,9 @@ function renderTasks() {
 
       <div class="flex justify-between items-end mb-3 px-1 animate-slide-up delay-75">
         <h3 class="font-bold text-white text-sm">Доступные задания</h3>
-        <span class="text-[10px] bg-slate-800 border border-slate-700 text-slate-400 px-2 py-1 rounded-lg font-bold shadow-inner">${state.tasks.length} доступно</span>
+        <button onclick="window.openAchievementsModal()" class="text-[10px] bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 px-3 py-1.5 rounded-lg font-bold shadow-inner tap-effect hover:bg-yellow-500/20 flex items-center transition-colors">
+          <i class="fas fa-medal mr-1.5"></i> Ачивки
+        </button>
       </div>
       <div class="space-y-3 pb-20">
   `;
@@ -1174,6 +1202,14 @@ function renderProfile() {
           </button>
           <button id="withdraw-btn" class="flex-1 py-3.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 rounded-xl flex items-center justify-center transition-all tap-effect font-bold text-sm shadow-inner group-hover:border-slate-500">
             <i class="fas fa-arrow-up mr-2 text-slate-400 group-hover:text-white transition-colors"></i> Вывести
+          </button>
+        </div>
+        <div class="flex space-x-3 mt-3 relative z-10">
+          <button onclick="window.openStakingModal()" class="flex-1 py-2.5 bg-slate-900/60 hover:bg-slate-800 text-blue-400 rounded-xl border border-blue-500/20 flex items-center justify-center transition-all tap-effect font-bold text-xs shadow-inner">
+            <i class="fas fa-vault mr-2"></i> Сейф (Стейкинг)
+          </button>
+          <button onclick="window.openFAQModal()" class="flex-1 py-2.5 bg-slate-900/60 hover:bg-slate-800 text-teal-400 rounded-xl border border-teal-500/20 flex items-center justify-center transition-all tap-effect font-bold text-xs shadow-inner">
+            <i class="fas fa-question-circle mr-2"></i> FAQ
           </button>
         </div>
         <p class="text-center text-[9px] text-slate-500 font-medium mt-3 relative z-10">Минимальная сумма вывода: <span class="text-slate-300">${minWith} USDT</span></p>
@@ -1711,6 +1747,7 @@ function renderAdminTab(tab) {
     case 'tasks': container.innerHTML = renderAdminTasks(); break;
     case 'finances': container.innerHTML = renderAdminFinances(); break;
     case 'settings': container.innerHTML = renderAdminSettings(); break;
+    case 'broadcast': container.innerHTML = renderAdminBroadcast(); break;
   }
   adminContentArea.appendChild(container);
 }
@@ -2323,6 +2360,94 @@ function renderAdminFinances() {
           </div>
         </div>
       `).join('')}
+    </div>
+  `;
+}
+
+window.sendBroadcast = async () => {
+  const message = document.getElementById('broadcast-text').value.trim();
+  const imageUrl = document.getElementById('broadcast-image').value.trim();
+  const buttonText = document.getElementById('broadcast-btn-text').value.trim();
+  const buttonUrl = document.getElementById('broadcast-btn-url').value.trim();
+
+  if (!message) {
+    showToast('Введите текст рассылки');
+    return;
+  }
+
+  const btn = document.getElementById('send-broadcast-btn');
+  const originalText = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Отправка...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_URL}/broadcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, imageUrl, buttonText, buttonUrl, adminId: currentUser.id })
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message || 'Рассылка успешно запущена!');
+      document.getElementById('broadcast-text').value = '';
+      document.getElementById('broadcast-image').value = '';
+      document.getElementById('broadcast-btn-text').value = '';
+      document.getElementById('broadcast-btn-url').value = '';
+      state.admin.recentActivity.unshift({ time: 'Только что', text: 'Запущена массовая рассылка' });
+      saveState();
+    } else {
+      showToast('Ошибка при запуске рассылки');
+    }
+  } catch (e) {
+    console.error(e);
+    showToast('Ошибка соединения с сервером');
+  } finally {
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+  }
+};
+
+function renderAdminBroadcast() {
+  return `
+    <div class="mb-6 animate-slide-up relative z-10">
+      <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Рассылка</h1>
+      <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Отправка сообщений всем пользователям бота</p>
+    </div>
+
+    <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-teal-500/50 transition-all duration-300 animate-slide-up delay-75 pb-20 z-10">
+       <div class="absolute -right-10 -top-10 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors"></div>
+       <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-bullhorn text-teal-400 mr-2"></i>Создать сообщение</h2>
+       
+       <div class="space-y-4 relative z-10">
+          <div class="relative">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Текст сообщения (поддерживает HTML)*</label>
+            <textarea id="broadcast-text" rows="5" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 px-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner" placeholder="<b>Жирный текст</b>\nОбычный текст..."></textarea>
+          </div>
+          
+          <div class="relative">
+            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">URL картинки (необязательно)</label>
+            <div class="relative flex items-center">
+              <i class="fas fa-image absolute left-3.5 text-slate-500"></i>
+              <input type="text" id="broadcast-image" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 outline-none transition-all shadow-inner" placeholder="https://...">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+             <div class="relative">
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Текст кнопки (необяз.)</label>
+                <input type="text" id="broadcast-btn-text" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 px-3 text-sm text-white focus:border-teal-500 outline-none transition-all shadow-inner" placeholder="Играть">
+             </div>
+             <div class="relative">
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">URL кнопки (необяз.)</label>
+                <input type="text" id="broadcast-btn-url" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 px-3 text-sm text-white focus:border-teal-500 outline-none transition-all shadow-inner" placeholder="https://t.me/...">
+             </div>
+          </div>
+          
+          <button id="send-broadcast-btn" onclick="window.sendBroadcast()" class="w-full mt-2 py-4 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white font-black text-sm rounded-2xl shadow-[0_10px_25px_rgba(20,184,166,0.3)] tap-effect border border-teal-400/50 uppercase tracking-wide flex items-center justify-center">
+             <i class="fas fa-paper-plane mr-2"></i> Отправить рассылку
+          </button>
+       </div>
     </div>
   `;
 }
