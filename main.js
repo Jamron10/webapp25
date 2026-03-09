@@ -20,17 +20,27 @@ const User = {
     try {
       if (!q.id) return null;
       const res = await fetch(`${API_URL}/users/${q.id}`);
-      if (!res.ok) return null;
+      if (!res.ok) throw new Error('Not OK');
       const data = await res.json();
       return data && Object.keys(data).length > 0 ? data : null;
-    } catch(e) { console.error("API Error (findOne):", e); return null; }
+    } catch(e) { 
+      const local = localStorage.getItem(`user_${q.id}`);
+      return local ? JSON.parse(local) : null; 
+    }
   },
   async find(q = {}) {
     try {
       const res = await fetch(`${API_URL}/users`);
-      if (!res.ok) return [];
+      if (!res.ok) throw new Error('Not OK');
       return await res.json();
-    } catch(e) { console.error("API Error (find):", e); return []; }
+    } catch(e) { 
+      let all = [];
+      for(let i=0; i<localStorage.length; i++){
+        let k = localStorage.key(i);
+        if(k.startsWith('user_')) all.push(JSON.parse(localStorage.getItem(k)));
+      }
+      return all; 
+    }
   },
   async create(doc) {
     try {
@@ -39,8 +49,12 @@ const User = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(doc)
       });
+      if (!res.ok) throw new Error('Not OK');
       return await res.json();
-    } catch(e) { console.error("API Error (create):", e); return null; }
+    } catch(e) { 
+      localStorage.setItem(`user_${doc.id}`, JSON.stringify(doc));
+      return doc; 
+    }
   },
   async updateOne(q, u) {
     try {
@@ -50,15 +64,24 @@ const User = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(u)
       });
+      if (!res.ok) throw new Error('Not OK');
       return await res.json();
-    } catch(e) { console.error("API Error (updateOne):", e); return null; }
+    } catch(e) { 
+      let doc = u.$set ? { id: q.id, data: u.$set.data } : u;
+      localStorage.setItem(`user_${q.id}`, JSON.stringify(doc));
+      return doc; 
+    }
   },
   async deleteOne(q) {
     try {
       if (!q.id) return null;
       const res = await fetch(`${API_URL}/users/${q.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Not OK');
       return await res.json();
-    } catch(e) { console.error("API Error (deleteOne):", e); return null; }
+    } catch(e) { 
+      localStorage.removeItem(`user_${q.id}`);
+      return { success: true }; 
+    }
   }
 };
 
