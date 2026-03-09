@@ -20,9 +20,9 @@
           },
           colors: {
             slate: {
-              900: '#0a0a0f', // Very dark neon background
-              850: '#12121c', // Panels/Modals
-              800: '#1f1f2e', // Borders/Cards
+              900: '#0a0a0f',
+              850: '#12121c',
+              800: '#1f1f2e',
               700: '#2d2d42',
               600: '#3f3f5a',
               500: '#58587a',
@@ -31,11 +31,11 @@
               200: '#b8b8d4',
             },
             teal: {
-              400: '#c084fc', // Map teal to bright violet/purple
+              400: '#c084fc',
               500: '#a855f7',
             },
             blue: {
-              400: '#f472b6', // Map blue to hot pink
+              400: '#f472b6',
               500: '#ec4899',
             }
           }
@@ -45,10 +45,9 @@
   </script>
 </head>
 <body class="bg-slate-900 text-white font-sans overflow-hidden select-none">
-  <!-- Main App Container (Mobile View by Default) -->
+  <!-- Main App Container -->
   <div id="app" class="flex flex-col h-screen w-full max-w-md mx-auto relative bg-slate-900 shadow-2xl overflow-hidden transition-all duration-300">
     
-    <!-- Top Header -->
     <header id="app-header" class="flex items-center justify-between py-2.5 px-4 bg-slate-850 border-b border-slate-800 z-10 shrink-0">
       <div class="flex items-center space-x-2">
         <div id="user-avatar" class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] overflow-hidden skeleton"></div>
@@ -58,7 +57,6 @@
         </div>
       </div>
       <div class="flex items-center relative">
-        <!-- Hidden admin toggle (tap 5 times to show admin) -->
         <button id="admin-trigger" class="w-12 h-12 absolute -top-2 -right-2 z-50 opacity-0"></button>
         <div class="text-right pointer-events-none">
           <p class="text-[9px] text-slate-400 uppercase tracking-wide">Заработано</p>
@@ -67,12 +65,8 @@
       </div>
     </header>
 
-    <!-- Main Content Area -->
-    <main id="content-area" class="flex-1 overflow-y-auto pb-20 relative scroll-smooth hide-scrollbar">
-      <!-- Content injected by JS -->
-    </main>
+    <main id="content-area" class="flex-1 overflow-y-auto pb-20 relative scroll-smooth hide-scrollbar"></main>
 
-    <!-- Bottom Navigation -->
     <nav class="absolute bottom-0 animate-slide-up delay-150 w-full bg-slate-850 border-t border-slate-800 flex justify-around items-center pb-safe pt-2 z-20">
       <button class="nav-btn active flex flex-col items-center p-2 text-teal-400 w-1/5 transition-colors" data-tab="home">
         <i class="fas fa-home text-xl mb-1"></i>
@@ -97,10 +91,9 @@
     </nav>
   </div>
 
-  <!-- Admin Fullscreen Overlay -->
+  <!-- Admin Panel -->
   <div id="admin-app" class="fixed inset-0 bg-slate-900 z-[100] hidden flex-col md:flex-row w-full h-full overflow-hidden text-white">
     
-    <!-- Desktop Sidebar (hidden on mobile) -->
     <aside class="hidden md:flex w-64 bg-slate-850 border-r border-slate-800 flex-col shrink-0">
       <div class="p-6 border-b border-slate-800 flex justify-between items-center">
         <div>
@@ -109,7 +102,7 @@
         </div>
         <button class="close-admin-btn text-slate-400 hover:text-white transition-colors p-2"><i class="fas fa-sign-out-alt text-lg"></i></button>
       </div>
-      <nav class="flex-1 p-4 space-y-2 overflow-y-auto" id="admin-nav-desktop">
+      <nav class="flex-1 p-4 space-y-2 overflow-y-auto hide-scrollbar" id="admin-nav-desktop">
         <button class="admin-tab-btn active w-full flex items-center space-x-3 p-3 rounded-xl text-left transition-colors bg-teal-500/10 text-teal-400 font-medium text-sm" data-atab="dashboard">
           <i class="fas fa-chart-pie w-5 text-center"></i><span>Дашборд</span>
         </button>
@@ -125,16 +118,16 @@
         <button class="admin-tab-btn w-full flex items-center space-x-3 p-3 rounded-xl text-left transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 font-medium text-sm" data-atab="settings">
           <i class="fas fa-cog w-5 text-center"></i><span>Настройки</span>
         </button>
+        <button class="admin-tab-btn w-full flex items-center space-x-3 p-3 rounded-xl text-left transition-colors text-slate-400 hover:bg-slate-800 hover:text-slate-200 font-medium text-sm" data-atab="broadcast">
+          <i class="fas fa-bullhorn w-5 text-center"></i><span>Рассылка</span>
+        </button>
       </nav>
       <div class="p-4 border-t border-slate-800 text-[10px] text-slate-500 text-center uppercase tracking-widest">
         v2.1.0 Panel
       </div>
     </aside>
 
-    <!-- Main Admin Content Area -->
     <main class="flex-1 flex flex-col h-full relative overflow-hidden bg-slate-900">
-      
-      <!-- Mobile Header -->
       <header class="md:hidden flex justify-between items-center p-4 bg-slate-850 border-b border-slate-800 shrink-0 z-10 shadow-sm">
         <h2 class="text-base font-bold text-teal-400 flex items-center space-x-2">
           <i class="fas fa-shield-alt"></i>
@@ -143,47 +136,45 @@
         <button class="close-admin-btn text-slate-400 hover:text-white p-2 tap-effect"><i class="fas fa-times text-lg"></i></button>
       </header>
 
-      <!-- Scrollable Sub-tab Content -->
       <div id="admin-content-area" class="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 scroll-smooth hide-scrollbar">
         <!-- Injected via JS -->
       </div>
     </main>
 
-    <!-- Mobile Bottom Nav -->
     <nav class="md:hidden absolute bottom-0 w-full bg-slate-850 border-t border-slate-800 flex justify-around items-center pb-safe pt-2 z-20 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.3)]" id="admin-nav-mobile">
-      <button class="admin-tab-btn active flex flex-col items-center p-2 text-teal-400 w-1/5 transition-colors" data-atab="dashboard">
+      <button class="admin-tab-btn active flex-1 flex flex-col items-center p-2 text-teal-400 transition-colors" data-atab="dashboard">
         <i class="fas fa-chart-pie text-lg mb-1"></i>
         <span class="text-[9px] font-medium tracking-wide">Дашборд</span>
       </button>
-      <button class="admin-tab-btn flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 w-1/5 transition-colors" data-atab="users">
+      <button class="admin-tab-btn flex-1 flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 transition-colors" data-atab="users">
         <i class="fas fa-users text-lg mb-1"></i>
         <span class="text-[9px] font-medium tracking-wide">Юзеры</span>
       </button>
-      <button class="admin-tab-btn flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 w-1/5 transition-colors" data-atab="tasks">
+      <button class="admin-tab-btn flex-1 flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 transition-colors" data-atab="tasks">
         <i class="fas fa-tasks text-lg mb-1"></i>
         <span class="text-[9px] font-medium tracking-wide">Задания</span>
       </button>
-      <button class="admin-tab-btn flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 w-1/5 transition-colors" data-atab="finances">
+      <button class="admin-tab-btn flex-1 flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 transition-colors" data-atab="finances">
         <i class="fas fa-wallet text-lg mb-1"></i>
         <span class="text-[9px] font-medium tracking-wide">Финансы</span>
       </button>
-      <button class="admin-tab-btn flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 w-1/5 transition-colors" data-atab="settings">
+      <button class="admin-tab-btn flex-1 flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 transition-colors" data-atab="settings">
         <i class="fas fa-cog text-lg mb-1"></i>
         <span class="text-[9px] font-medium tracking-wide">Настройки</span>
+      </button>
+      <button class="admin-tab-btn flex-1 flex flex-col items-center p-2 text-slate-400 hover:text-slate-200 transition-colors" data-atab="broadcast">
+        <i class="fas fa-bullhorn text-lg mb-1"></i>
+        <span class="text-[9px] font-medium tracking-wide">Рассылка</span>
       </button>
     </nav>
   </div>
 
-  <!-- GLOBAL OVERLAYS (Moved outside #app so they work perfectly in Admin Mode too) -->
-
-  <!-- Modal Overlay -->
+  <!-- Overlays -->
   <div id="modal-overlay" class="fixed inset-0 bg-black/80 z-[150] hidden flex items-center justify-center backdrop-blur-sm transition-opacity opacity-0">
     <div id="modal-content" class="bg-slate-850 w-11/12 max-w-sm rounded-3xl border border-slate-700 shadow-2xl transform scale-95 transition-transform p-6 max-h-[90vh] overflow-y-auto hide-scrollbar">
-      <!-- Modal content injected here -->
     </div>
   </div>
 
-  <!-- Blocking Screen (TG Only / Banned / Maintenance) -->
   <div id="block-screen" class="fixed inset-0 bg-slate-900 z-[200] hidden flex-col items-center justify-center text-center p-6 backdrop-blur-md bg-opacity-95">
     <div id="block-icon" class="text-6xl mb-4 drop-shadow-lg"></div>
     <h2 id="block-title" class="text-2xl font-bold text-white mb-2"></h2>
@@ -191,12 +182,12 @@
     <button id="dev-bypass-btn" class="text-xs text-slate-500 underline px-4 py-2 mt-4 hover:text-white transition-colors hidden">Продолжить для теста (Dev)</button>
   </div>
 
-  <!-- Toast Notification -->
   <div id="toast" class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-teal-500 text-white font-bold px-5 py-2.5 rounded-2xl shadow-lg shadow-teal-500/20 z-[160] transition-all opacity-0 pointer-events-none translate-y-[-20px] text-center w-max max-w-[90%] text-sm">
     Уведомление
   </div>
 
   <script src="https://miniapps.ai/sdk/miniapps-ai-v1.js"></script>
+  <script src="features.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
