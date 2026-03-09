@@ -35,8 +35,7 @@ const app = express();
 app.use(cors()); // Разрешаем CORS для запросов из Web App
 app.use(express.json({ limit: '50mb' })); // Увеличиваем лимит для больших объектов состояния
 
-const path = require('path');
-// Раздаем файлы визуального интерфейса (Фронтенд)\n
+// Раздаем файлы визуального интерфейса (Фронтенд)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -99,6 +98,56 @@ app.delete('/api/users/:id', async (req, res) => {
   } catch (err) { res.status(500).json({error: err.message}); }
 });
 
+// ==========================================
+// НОВЫЙ ЭНДПОИНТ ДЛЯ РАССЫЛКИ
+// ==========================================
+app.post('/api/broadcast', async (req, res) => {
+  try {
+    const { message, imageUrl, buttonText, buttonUrl } = req.body;
+    if (!message) return res.status(400).json({ error: "No message provided" });
+    
+    const users = await User.find({});
+    let success = 0;
+    let failed = 0;
+    
+    // Отвечаем сразу, чтобы не вешать фронтенд
+    res.json({ success: true, total: users.length, message: "Рассылка запущена!" });
+
+    const sendToUser = async (user) => {
+      try {
+        const extra = { parse_mode: 'HTML' };
+        if (buttonText && buttonUrl) {
+          extra.reply_markup = {
+            inline_keyboard: [[{ text: buttonText, url: buttonUrl }]]
+          };
+        }
+        if (imageUrl) {
+          await bot.telegram.sendPhoto(user.id, imageUrl, { caption: message, ...extra });
+        } else {
+          await bot.telegram.sendMessage(user.id, message, extra);
+        }
+        success++;
+      } catch(e) {
+        failed++;
+      }
+    };
+
+    // Запуск асинхронного цикла с задержкой (чтобы не словить лимит Telegram ~30 msg/sec)
+    (async () => {
+       console.log(`[Broadcast] Starting broadcast to ${users.length} users...`);
+       for (const user of users) {
+         await sendToUser(user);
+         // Пауза 50мс (20 сообщений в секунду)
+         await new Promise(r => setTimeout(r, 50));
+       }
+       console.log(`[Broadcast] Finished! Success: ${success}, Failed: ${failed}`);
+    })();
+
+  } catch (err) { 
+    console.error("Broadcast error:", err);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ API Сервер запущен на порту ${PORT}`);
 });
@@ -156,7 +205,3 @@ bot.launch().then(() => {
 // Плавная остановка
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-
-
-
