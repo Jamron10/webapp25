@@ -88,11 +88,11 @@ window.equipSkin = (id) => {
 
 // --- ДОСТИЖЕНИЯ ---
 window.ACHIEVEMENTS = [
-    { id: 'inv_1', title: 'Душа компании', desc: 'Пригласи 1 друга', type: 'friends', target: 1, reward: 0.5, icon: 'fa-user-plus' },
-    { id: 'inv_10', title: 'Сетевик', desc: 'Пригласи 10 друзей', type: 'friends', target: 10, reward: 5, icon: 'fa-users' },
-    { id: 'lvl_5', title: 'Инженер', desc: 'Прокачай майнер до 5 уровня', type: 'level', target: 5, reward: 2, icon: 'fa-arrow-up' },
-    { id: 'earn_10', title: 'Первые деньги', desc: 'Намайни 10 USDT', type: 'earned', target: 10, reward: 1, icon: 'fa-coins' },
-    { id: 'with_1', title: 'Инвестор', desc: 'Сделай первый вывод', type: 'withdraw', target: 1, reward: 2, icon: 'fa-wallet' }
+    { id: 'inv_1', title: 'Душа компании', desc: 'Пригласи 1 друга', type: 'friends', target: 1, reward: 0.05, icon: 'fa-user-plus' },
+    { id: 'inv_10', title: 'Сетевик', desc: 'Пригласи 10 друзей', type: 'friends', target: 10, reward: 0.5, icon: 'fa-users' },
+    { id: 'lvl_5', title: 'Инженер', desc: 'Прокачай майнер до 5 уровня', type: 'level', target: 5, reward: 0.2, icon: 'fa-arrow-up' },
+    { id: 'earn_10', title: 'Первые деньги', desc: 'Намайни 10 USDT', type: 'earned', target: 10, reward: 0.1, icon: 'fa-coins' },
+    { id: 'with_1', title: 'Инвестор', desc: 'Сделай первый вывод', type: 'withdraw', target: 1, reward: 0.2, icon: 'fa-wallet' }
 ];
 
 window.checkAchievementProgress = (type) => {
