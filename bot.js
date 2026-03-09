@@ -7,7 +7,7 @@ require('dotenv').config();
 // ==========================================
 // НАСТРОЙКИ
 // ==========================================
-const BOT_TOKEN = process.env.BOT_TOKEN || '8530910919:AAFp__X2DJZ44Z3HXN52NLSyEPVjwAgvfzs'; 
+const BOT_TOKEN = '8530910919:AAFp__X2DJZ44Z3HXN52NLSyEPVjwAgvfzs'; 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tetherflow';
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://webapp26.onrender.com/'; // Замените на ссылку Web App
 const PORT = process.env.PORT || 3000;
@@ -156,6 +156,7 @@ bot.launch().then(() => {
 // Плавная остановка
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
 
 
 
