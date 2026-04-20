@@ -9,7 +9,7 @@ require('dotenv').config();
 // Настройки
 // ==========================
 const BOT_TOKEN = '7750765391:AAEFhZLEIR8uock0MVMxOfnkXIB69XuSX6k';
-const MONGO_URI = 'mongodb+srv://narekmxeyan2024_db_user:30w56Iz0PajXNhCl@cluster0.wuftzdl.mongodb.net/?appName=Cluster0';
+const MONGO_URI = 'mongodb+srv://jamron:Y4gXOmP5VOThJMBS@cluster0.ucx8kac.mongodb.net/?appName=Cluster0';
 const WEB_APP_URL = 'https://webapp25.onrender.com/';
 const PORT = 3000;
 const WEBHOOK_URL = `https://webapp25.onrender.com/bot${BOT_TOKEN}`;
