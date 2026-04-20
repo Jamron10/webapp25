@@ -88,11 +88,11 @@ window.equipSkin = (id) => {
 
 // --- ДОСТИЖЕНИЯ ---
 window.ACHIEVEMENTS = [
-    { id: 'inv_1', title: 'Душа компании', desc: 'Пригласи 1 друга', type: 'friends', target: 1, reward: 0.05, icon: 'fa-user-plus' },
-    { id: 'inv_10', title: 'Сетевик', desc: 'Пригласи 10 друзей', type: 'friends', target: 10, reward: 0.5, icon: 'fa-users' },
-    { id: 'lvl_5', title: 'Инженер', desc: 'Прокачай майнер до 5 уровня', type: 'level', target: 5, reward: 0.2, icon: 'fa-arrow-up' },
-    { id: 'earn_10', title: 'Первые деньги', desc: 'Намайни 10 USDT', type: 'earned', target: 10, reward: 0.1, icon: 'fa-coins' },
-    { id: 'with_1', title: 'Инвестор', desc: 'Сделай первый вывод', type: 'withdraw', target: 1, reward: 0.2, icon: 'fa-wallet' }
+    { id: 'inv_1', title: 'Душа компании', desc: 'Пригласи 1 друга', type: 'friends', target: 1, reward: 0.01, icon: 'fa-user-plus' },
+    { id: 'inv_10', title: 'Сетевик', desc: 'Пригласи 10 друзей', type: 'friends', target: 10, reward: 0.1, icon: 'fa-users' },
+    { id: 'lvl_5', title: 'Инженер', desc: 'Прокачай майнер до 5 уровня', type: 'level', target: 5, reward: 0.04, icon: 'fa-arrow-up' },
+    { id: 'earn_10', title: 'Первые деньги', desc: 'Намайни 10 USDT', type: 'earned', target: 10, reward: 0.02, icon: 'fa-coins' },
+    { id: 'with_1', title: 'Инвестор', desc: 'Сделай первый вывод', type: 'withdraw', target: 1, reward: 0.04, icon: 'fa-wallet' }
 ];
 
 window.checkAchievementProgress = (type) => {
@@ -323,32 +323,30 @@ window.openFAQModal = () => {
             <button onclick="window.closeModal()" class="w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
         </div>
         <div class="space-y-3 max-h-[60vh] overflow-y-auto hide-scrollbar pb-4">
-            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50">
-                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-hammer text-slate-400 mr-1.5"></i> Как работает майнинг?</h4>
+            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50 animate-slide-up">
+                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-hammer text-teal-400 mr-1.5"></i> Как работает майнинг?</h4>
                 <p class="text-slate-400 text-xs leading-relaxed">Ваш майнер работает 24/7. Даже когда вы закрыли приложение, USDT продолжают капать. Важно: хранилище заполняется за сутки, заходите собирать прибыль хотя бы раз в день.</p>
             </div>
-            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50">
-                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-arrow-up text-slate-400 mr-1.5"></i> Как повысить доход?</h4>
+            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50 animate-slide-up delay-75">
+                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-arrow-up text-pink-400 mr-1.5"></i> Как повысить доход?</h4>
                 <p class="text-slate-400 text-xs leading-relaxed">Улучшайте оборудование на главном экране за USDT. Чем выше уровень, тем больше добыча в час. Максимальный уровень - 10.</p>
             </div>
-            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50">
-                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-users text-slate-400 mr-1.5"></i> Реферальная система</h4>
+            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50 animate-slide-up delay-150">
+                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-users text-blue-400 mr-1.5"></i> Реферальная система</h4>
                 <p class="text-slate-400 text-xs leading-relaxed">Приглашайте друзей по своей ссылке. Вы получите фиксированный бонус за регистрацию и процент (%) от каждой их собранной прибыли с майнера.</p>
             </div>
-            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50">
-                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-wallet text-slate-400 mr-1.5"></i> Как вывести деньги?</h4>
-                <p class="text-slate-400 text-xs leading-relaxed">Перейдите в "Профиль", нажмите "Вывести", введите адрес вашего USDT кошелька (TRC-20 или BEP-20). Заявка будет обработана администратором.</p>
+            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50 animate-slide-up delay-225">
+                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-wallet text-yellow-400 mr-1.5"></i> Как вывести деньги?</h4>
+                <p class="text-slate-400 text-xs leading-relaxed">Перейдите в "Профиль", нажмите "Вывести", введите адрес вашего USDT кошелька ((сети TON или BEP-20)). Заявка будет обработана администратором.</p>
             </div>
-            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50">
-                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-vault text-slate-400 mr-1.5"></i> Что такое Сейф?</h4>
+            <div class="bg-slate-850 p-4 rounded-xl border border-slate-700/50 animate-slide-up delay-300">
+                <h4 class="text-white font-bold text-sm mb-2"><i class="fas fa-vault text-purple-400 mr-1.5"></i> Что такое Сейф?</h4>
                 <p class="text-slate-400 text-xs leading-relaxed">Заморозьте свои USDT на срок от 7 до 30 дней, чтобы получить сверху от 5% до 30% чистой прибыли после завершения срока.</p>
             </div>
         </div>
-        <button onclick="window.Telegram?.WebApp?.openTelegramLink('https://t.me/durov')" class="w-full mt-2 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs tap-effect border border-slate-600 shadow-sm transition-colors"><i class="fas fa-headset mr-2"></i>Связаться с поддержкой</button>
+        <button onclick="window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink ? window.Telegram.WebApp.openTelegramLink('https://t.me/Crypto_adminka') : window.open('https://t.me/Crypto_adminka', '_blank')" class="w-full mt-2 py-3 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white rounded-xl font-bold text-xs tap-effect shadow-[0_0_15px_rgba(20,184,166,0.3)] transition-all animate-slide-up delay-400"><i class="fas fa-headset mr-2"></i>Связаться с поддержкой</button>
     `;
     content.innerHTML = html;
     overlay.classList.remove('hidden');
     setTimeout(() => { overlay.classList.remove('opacity-0'); content.classList.remove('scale-95'); content.classList.add('animate-pop-in'); }, 10);
 };
-
-
