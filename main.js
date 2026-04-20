@@ -2,86 +2,120 @@
 // STATE & DATABASE CONFIG
 // ==========================================
 const STATE_KEY = 'tetherflow_data_v6';
-const BOT_APP_URL = 'https://t.me/JamronCasinoBot/app'; // ⚠️ ЗАМЕНИТЕ НА ВАШУ ССЫЛКУ WEB APP
-const ADMIN_ID = 5730406030; // ⚠️ ВПИШИТЕ ВАШ TELEGRAM ID
+const BOT_APP_URL = 'https://t.me/JamronShopBot/app'; // ⚠️ ЗАМЕНИТЕ НА ВАШУ ССЫЛКУ WEB APP
+const BOT_LINK = 'https://t.me/JamronShopBot'; // ⚠️ ССЫЛКА НА САМОГО БОТА (для рефералки)
+const MAIN_ADMIN_ID = 7689940325; // ⚠️ ТЕЛЕГРАМ ID ГЛАВНОГО АДМИНА
+const CO_ADMINS = [5730406030]; // ⚠️ ID ДРУГИХ АДМИНОВ ЧЕРЕЗ ЗАПЯТУЮ (указывайте сколько угодно)
+const ADMIN_LIST = [MAIN_ADMIN_ID, ...CO_ADMINS];
 
 // ==========================================
-// MONGODB API FALLBACK (LOCAL FOR NOW)
+// MYSQL API FALLBACK (LOCAL FOR NOW)
 // ==========================================
-// Внимание: Фронтенд (браузер) не может напрямую подключаться к MongoDB.
-// Временно данные сохраняются в localStorage (эмуляция Mongoose).
+// Внимание: Фронтенд (браузер) не может напрямую подключаться к MySQL.
+// Временно данные сохраняются в localStorage (эмуляция базы данных).
 // Для реальной работы нужно будет сделать fetch-запросы к Node.js бэкенду (bot.js).
 
-const API_URL = 'https://webapp26.onrender.com/api'; // Подключено к вашему серверу Render
+const API_URL = 'https://webapp25.onrender.com/api'; // Подключено к вашему серверу MongoDB
 let isDbActive = true;
+
+// Взаимодействие строго с вашей MongoDB через API
+// Я убрал резервное сохранение в localStorage: теперь данные сохраняются только навсегда в базу
+const SettingsAPI = {
+  async get() {
+    try {
+      const res = await fetch(`${API_URL}/settings?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+      const data = await res.json();
+      return data && data.data ? data.data : null;
+    } catch(e) {
+      console.warn('Settings API get Error:', e);
+      const local = await miniappsAI.storage.getItem('global_settings');
+      return local ? JSON.parse(local) : null;
+    }
+  },
+  async update(dataPayload) {
+    try { await miniappsAI.storage.setItem('global_settings', JSON.stringify(dataPayload)); } catch(err) {}
+    try {
+      const res = await fetch(`${API_URL}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        body: JSON.stringify({ data: dataPayload })
+      });
+      const json = await res.json();
+      console.log('Settings API Update Success:', json);
+      return json;
+    } catch(e) {
+      console.warn('Settings API update Error:', e);
+      return { data: dataPayload };
+    }
+  }
+};
 
 const User = {
   async findOne(q) {
+    if (q.id === undefined || q.id === null) return null;
     try {
-      if (!q.id) return null;
-      const res = await fetch(`${API_URL}/users/${q.id}`);
-      if (!res.ok) throw new Error('Not OK');
+      const res = await fetch(`${API_URL}/users/${q.id}?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const data = await res.json();
       return data && Object.keys(data).length > 0 ? data : null;
-    } catch(e) { 
-      const local = localStorage.getItem(`user_${q.id}`);
-      return local ? JSON.parse(local) : null; 
+    } catch(e) {
+      console.warn('DB findOne Error, trying local storage:', e);
+      const localData = await miniappsAI.storage.getItem(`db_user_${q.id}`);
+      return localData ? JSON.parse(localData) : null;
     }
   },
   async find(q = {}) {
     try {
-      const res = await fetch(`${API_URL}/users`);
-      if (!res.ok) throw new Error('Not OK');
+      const res = await fetch(`${API_URL}/users?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       return await res.json();
-    } catch(e) { 
-      let all = [];
-      for(let i=0; i<localStorage.length; i++){
-        let k = localStorage.key(i);
-        if(k.startsWith('user_')) all.push(JSON.parse(localStorage.getItem(k)));
-      }
-      return all; 
+    } catch(e) {
+      console.warn('DB find Error, returning local data:', e);
+      const localCurrent = await miniappsAI.storage.getItem(`db_user_${typeof currentUser !== 'undefined' && currentUser ? currentUser.id : 0}`);
+      const localGlobal = await miniappsAI.storage.getItem(`db_user_0`);
+      let list = [];
+      if(localGlobal) list.push(JSON.parse(localGlobal));
+      if(localCurrent && (!currentUser || currentUser.id !== 0)) list.push(JSON.parse(localCurrent));
+      return list;
     }
   },
   async create(doc) {
     try {
       const res = await fetch(`${API_URL}/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         body: JSON.stringify(doc)
       });
-      if (!res.ok) throw new Error('Not OK');
       return await res.json();
-    } catch(e) { 
-      localStorage.setItem(`user_${doc.id}`, JSON.stringify(doc));
-      return doc; 
-    }
+    } catch(e) { console.error('DB create Error:', e); return doc; }
   },
   async updateOne(q, u) {
+    if (q.id === undefined || q.id === null) return null;
+    let dataPayload = u.$set && u.$set.data ? u.$set.data : (u.data ? u.data : u);
+    
+    // Always save locally as a backup
+    try { await miniappsAI.storage.setItem(`db_user_${q.id}`, JSON.stringify({ id: q.id, data: dataPayload })); } catch(err) {}
+    
     try {
-      if (!q.id) return null;
       const res = await fetch(`${API_URL}/users/${q.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(u)
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+        body: JSON.stringify({ data: dataPayload })
       });
-      if (!res.ok) throw new Error('Not OK');
       return await res.json();
-    } catch(e) { 
-      let doc = u.$set ? { id: q.id, data: u.$set.data } : u;
-      localStorage.setItem(`user_${q.id}`, JSON.stringify(doc));
-      return doc; 
+    } catch(e) {
+      console.warn('DB updateOne Error, saved locally:', e);
+      return { id: q.id, data: dataPayload };
     }
   },
   async deleteOne(q) {
+    if (q.id === undefined || q.id === null) return null;
+    try { await miniappsAI.storage.removeItem(`db_user_${q.id}`); } catch(err) {}
     try {
-      if (!q.id) return null;
-      const res = await fetch(`${API_URL}/users/${q.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Not OK');
+      const res = await fetch(`${API_URL}/users/${q.id}`, { method: 'DELETE', headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
       return await res.json();
-    } catch(e) { 
-      localStorage.removeItem(`user_${q.id}`);
-      return { success: true }; 
-    }
+    } catch(e) { console.error('DB deleteOne Error:', e); return { success: true }; }
   }
 };
 
@@ -90,6 +124,7 @@ let state = {
   user: {
     balance: 0.00,
     totalEarned: 0.00,
+    isMinerActivated: false, // Флаг: активирован ли майнер за 3 USDT
     uncollected: 0.00,  // Сколько намайнено, но еще не собрано
     lastSync: Date.now(), // Время последней синхронизации майнинга
     level: 1,
@@ -123,20 +158,7 @@ let state = {
 };
 
 // Для веба выдаем рандомный ID, чтобы не склеивались сессии
-const generateWebId = () => Math.floor(Math.random() * 900000) + 100000;
-let localWebId = localStorage.getItem('local_web_id');
-if (!localWebId) {
-    localWebId = generateWebId();
-    localStorage.setItem('local_web_id', localWebId);
-}
-
-let currentUser = {
-  id: Number(localWebId),
-  first_name: 'Web',
-  last_name: 'User',
-  username: 'web_' + localWebId,
-  photo_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + localWebId
-};
+let currentUser = null;
 
 let currentTab = 'home';
 let currentAdminTab = 'dashboard';
@@ -176,29 +198,42 @@ fixOverlaysHierarchy();
 // ==========================================
 function parseTgData() {
   let initDataUnsafe = {};
+  
   if (window.Telegram?.WebApp?.initDataUnsafe && Object.keys(window.Telegram.WebApp.initDataUnsafe).length > 0) {
-    initDataUnsafe = window.Telegram.WebApp.initDataUnsafe;
-  } else {
-    try {
-      const source = window.location.hash.slice(1) || window.location.search.slice(1);
-      const params = new URLSearchParams(source);
-      const tgWebAppData = params.get('tgWebAppData');
-      if (tgWebAppData) {
-        const dataParams = new URLSearchParams(tgWebAppData);
-        for (let [key, value] of dataParams.entries()) {
-          if (key === 'user') {
-            try { initDataUnsafe.user = JSON.parse(decodeURIComponent(value)); } catch(e){}
-          } else {
-            initDataUnsafe[key] = decodeURIComponent(value);
+    initDataUnsafe = JSON.parse(JSON.stringify(window.Telegram.WebApp.initDataUnsafe));
+  }
+  
+  try {
+    const source = window.location.hash.slice(1) || window.location.search.slice(1);
+    const params = new URLSearchParams(source);
+    const searchParams = new URLSearchParams(window.location.search);
+    
+    // 1. Безопасно достаем startapp из параметров URL (важно для кнопок Web App)
+    const startParam = searchParams.get('startapp') || params.get('startapp') || searchParams.get('tgWebAppStartParam') || params.get('tgWebAppStartParam') || searchParams.get('start_param');
+    if (startParam && !initDataUnsafe.start_param) {
+        initDataUnsafe.start_param = startParam;
+    }
+
+    // 2. Если пользователь не подгрузился из Telegram (открыто вне ТГ или баг кэша), парсим из URL
+    if (!initDataUnsafe.user) {
+        const tgWebAppData = params.get('tgWebAppData') || searchParams.get('tgWebAppData');
+        if (tgWebAppData) {
+          const dataParams = new URLSearchParams(tgWebAppData);
+          for (let [key, value] of dataParams.entries()) {
+            if (key === 'user') {
+              try { initDataUnsafe.user = JSON.parse(decodeURIComponent(value)); } catch(e){}
+            } else if (!initDataUnsafe[key]) {
+              initDataUnsafe[key] = decodeURIComponent(value);
+            }
           }
         }
-        if (dataParams.get('start_param')) initDataUnsafe.start_param = dataParams.get('start_param');
-      }
-      if (params.get('startapp')) initDataUnsafe.start_param = params.get('startapp');
-      if (params.get('tgWebAppStartParam')) initDataUnsafe.start_param = params.get('tgWebAppStartParam');
-      if (params.get('admin') === '1') isAdmin = true;
-    } catch(e) { console.warn("Parse TG data error", e); }
+    }
+    
+    if (params.get('admin') === '1' || searchParams.get('admin') === '1') isAdmin = true;
+  } catch(e) { 
+    console.warn("Parse TG data error", e); 
   }
+  
   return initDataUnsafe;
 }
 
@@ -215,6 +250,20 @@ async function initApp() {
       window.parent.postMessage(JSON.stringify({eventType: 'web_app_expand', eventData: ""}), '*');
       window.parent.postMessage(JSON.stringify({eventType: 'web_app_ready', eventData: ""}), '*');
     } catch(e) {}
+  } else {
+    // Web fallback using miniappsAI.storage
+    let localWebId = await miniappsAI.storage.getItem('local_web_id');
+    if (!localWebId) {
+      localWebId = Math.floor(Math.random() * 900000) + 100000;
+      await miniappsAI.storage.setItem('local_web_id', localWebId.toString());
+    }
+    currentUser = {
+      id: Number(localWebId),
+      first_name: 'Web',
+      last_name: 'User',
+      username: 'web_' + localWebId,
+      photo_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + localWebId
+    };
   }
 
   await loadState(tgData);
@@ -224,9 +273,8 @@ async function initApp() {
     if(!checkAccess()) return;
     updateHeaderUI();
     setupNavigation();
-    setupAdminTrigger();
     
-    if (currentUser.id === ADMIN_ID || isAdmin) {
+    if (ADMIN_LIST.includes(Number(currentUser.id)) || isAdmin) {
       isAdmin = true;
       document.getElementById('nav-admin').classList.remove('hidden');
       document.getElementById('nav-admin').classList.add('flex');
@@ -240,25 +288,25 @@ async function initApp() {
 }
 
 async function loadState(tgData) {
-   let userDoc = await User.findOne({ id: currentUser.id });
-   
    let globalSettings = null;
-   let globalTasks = null;
-   let globalPromos = null;
-   
-   if (currentUser.id !== ADMIN_ID) {
-       const adminDoc = await User.findOne({ id: ADMIN_ID });
-       if (adminDoc && adminDoc.data) {
-           if (adminDoc.data.settings) globalSettings = adminDoc.data.settings;
-           if (adminDoc.data.tasks) globalTasks = adminDoc.data.tasks;
-           if (adminDoc.data.admin && adminDoc.data.admin.promoCodes) globalPromos = adminDoc.data.admin.promoCodes;
-       }
+   let globalTasks = [];
+   let globalPromos = [];
+
+   let globalData = await SettingsAPI.get();
+   if (!globalData || Object.keys(globalData).length === 0) {
+       globalData = { tasks: [], settings: state.settings, promoCodes: [] };
+       await SettingsAPI.update(globalData);
+   } else {
+       if (globalData.settings) globalSettings = globalData.settings;
+       if (globalData.tasks) globalTasks = globalData.tasks;
+       if (globalData.promoCodes) globalPromos = globalData.promoCodes;
    }
 
+   let userDoc = await User.findOne({ id: currentUser.id });
+   
    if (userDoc && userDoc.data && Object.keys(userDoc.data).length > 0) {
       const dbData = userDoc.data;
       
-      // BLOAT CLEANUP: Remove massive nested admin arrays from regular users to prevent lag
       if (dbData.admin && dbData.admin.users) {
           dbData.admin.users = [];
           dbData.admin.pendingWithdrawals = [];
@@ -272,7 +320,12 @@ async function loadState(tgData) {
       state.user.staking = state.user.staking || [];
       state.user.squadId = state.user.squadId || null;
       if (!state.squads) state.squads = [];
-      state.tasks = globalTasks || dbData.tasks || state.tasks;
+      
+      state.tasks = globalTasks.map(gt => {
+          const userTask = (dbData.tasks || []).find(t => t.id === gt.id);
+          return userTask ? { ...gt, status: userTask.status } : { ...gt, status: 'todo' };
+      });
+      
       state.friends = dbData.friends || [];
       state.withdrawals = dbData.withdrawals || [];
       state.deposits = dbData.deposits || [];
@@ -282,16 +335,22 @@ async function loadState(tgData) {
       } else {
           state.admin = { ...state.admin, ...dbData.admin };
       }
-      if (globalPromos) state.admin.promoCodes = globalPromos;
-
-      if(dbData.settings) state.settings = { ...state.settings, ...dbData.settings };
-      if(globalSettings) state.settings = { ...state.settings, ...globalSettings };
+      
+      state.admin.promoCodes = globalPromos;
+      if (globalSettings) state.settings = { ...state.settings, ...globalSettings };
       
    } else {
-      await registerNewUserInDb(tgData);
-      if (globalTasks) state.tasks = globalTasks;
+      state.tasks = globalTasks.map(gt => ({ ...gt, status: 'todo' }));
       if (globalSettings) state.settings = { ...state.settings, ...globalSettings };
-      if (globalPromos) state.admin.promoCodes = globalPromos;
+      state.admin.promoCodes = globalPromos;
+          
+          // ВАЖНО: Присваиваем имя и данные юзера ДО того, как сохранить его первый раз в базу данных (чтобы инфа не терялась)
+          state.user.firstName = currentUser.first_name;
+          state.user.lastName = currentUser.last_name;
+          state.user.username = currentUser.username;
+          state.user.photoUrl = currentUser.photo_url;
+          
+          await registerNewUserInDb(tgData);
    }
    
    state.user.firstName = currentUser.first_name;
@@ -331,12 +390,11 @@ async function registerNewUserInDb(tgData) {
       } catch(e) { console.error("Referral processing error", e); }
    }
    state.user.lastSync = Date.now();
-   await User.create({ id: currentUser.id, data: state });
+   await User.updateOne({ id: currentUser.id }, { $set: { data: state } });
 }
 
 async function saveState() {
    try {
-      // Очищаем тяжелые массивы админа перед сохранением, чтобы база не раздувалась и не лагала
       const stateToSave = { ...state };
       if (stateToSave.admin) {
           stateToSave.admin = { 
@@ -347,6 +405,15 @@ async function saveState() {
           };
       }
       await User.updateOne({ id: currentUser.id }, { $set: { data: stateToSave } });
+
+      if (isAdmin || (typeof ADMIN_LIST !== 'undefined' && ADMIN_LIST.includes(Number(currentUser.id)))) {
+          const globalData = {
+              settings: state.settings,
+              tasks: state.tasks.map(t => ({ ...t, status: 'todo', currentUses: t.currentUses || 0, maxUses: t.maxUses || 0 })),
+              promoCodes: state.admin.promoCodes
+          };
+          await SettingsAPI.update(globalData);
+      }
    } catch (e) {
       console.error("Failed to save state", e);
    }
@@ -383,6 +450,7 @@ function checkAccess() {
 // MINING LOGIC
 // ==========================================
 function calculateOfflineMining() {
+    if (!state.user.isMinerActivated) return; // Майнинг не идет без активации
     if (!state.user.lastSync) state.user.lastSync = Date.now();
     if (state.user.uncollected === undefined) state.user.uncollected = 0;
     
@@ -406,6 +474,7 @@ function calculateOfflineMining() {
 
 function startMiningLoop() {
   setInterval(() => {
+    if (!state.user.isMinerActivated) return; // Майнинг не идет без активации
     const now = Date.now();
     if (!state.user.lastSync) state.user.lastSync = now;
     
@@ -427,6 +496,7 @@ function startMiningLoop() {
     // Update UI if on home tab
     if (currentTab === 'home') {
        const uncolEl = document.getElementById('uncollected-balance');
+  if (typeof startHomeParticles === 'function') startHomeParticles();
        const statusEl = document.getElementById('mining-status-text');
        if (uncolEl) {
          uncolEl.textContent = state.user.uncollected.toFixed(6);
@@ -469,7 +539,7 @@ function updateHeaderUI() {
   
   const initials = currentUser.first_name.charAt(0) + (currentUser.last_name ? currentUser.last_name.charAt(0) : '');
   const avatarEl = document.getElementById('user-avatar');
-  avatarEl.className = "admin-trigger-zone w-6 h-6 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold text-[10px] border border-slate-700 shadow-sm cursor-pointer relative z-50 overflow-hidden";
+  avatarEl.className = " w-6 h-6 rounded-full bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold text-[10px] border border-slate-700 shadow-sm cursor-pointer relative z-50 overflow-hidden";
   if (currentUser.photo_url) {
     avatarEl.innerHTML = `<img src="${currentUser.photo_url}" class="w-full h-full object-cover" alt="Avatar">`;
   } else {
@@ -482,7 +552,15 @@ function updateHeaderUI() {
 
 function triggerHaptic(style = 'light') {
   if (window.Telegram?.WebApp?.HapticFeedback) {
-    window.Telegram.WebApp.HapticFeedback.impactOccurred(style);
+    try {
+      if (['error', 'success', 'warning'].includes(style)) {
+        window.Telegram.WebApp.HapticFeedback.notificationOccurred(style);
+      } else {
+        window.Telegram.WebApp.HapticFeedback.impactOccurred(style);
+      }
+    } catch (e) {
+      console.warn('Haptic error', e);
+    }
   }
 }
 
@@ -528,9 +606,9 @@ function setupNavigation() {
       triggerHaptic('light');
 
       // Animating the icon on tap
-      const icon = e.currentTarget.querySelector('i');
-      icon.style.transform = 'scale(1.2)';
-      setTimeout(() => icon.style.transform = 'scale(1)', 150);
+      const target = e.currentTarget;
+      if(target) target.classList.add('animating');
+      setTimeout(() => { if(target) target.classList.remove('animating'); }, 400);
 
       if (tab === 'admin') {
         openAdminPanel();
@@ -551,28 +629,6 @@ function setupNavigation() {
       currentTab = tab;
       renderTab(tab);
     });
-  });
-}
-
-function setupAdminTrigger() {
-  let taps = 0;
-  let timeout;
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.admin-trigger-zone')) {
-      taps++;
-      clearTimeout(timeout);
-      timeout = setTimeout(() => taps = 0, 2000);
-      if (taps >= 5) {
-        if(!isAdmin) {
-            isAdmin = true;
-            document.getElementById('nav-admin').classList.remove('hidden');
-            document.getElementById('nav-admin').classList.add('flex');
-            showToast("🔑 Панель администратора разблокирована");
-            triggerHaptic('heavy');
-        }
-        taps = 0;
-      }
-    }
   });
 }
 
@@ -608,115 +664,173 @@ function renderHome() {
   const activeSkinId = state.user.activeSkin || 'default';
   const skin = (window.SKINS && window.SKINS.find(s => s.id === activeSkinId)) || { id: 'default', name: 'Оригинал', cost: 0, icon: 'fa-dharmachakra', colors: 'from-slate-800 to-slate-900', ring: 'border-t-teal-400', iconColor: 'text-teal-400' };
   const avatar = currentUser.photo_url 
-    ? `<img src="${currentUser.photo_url}" class="w-full h-full object-cover" alt="Avatar">` 
+    ? '<img src="' + currentUser.photo_url + '" class="w-full h-full object-cover" alt="Avatar">' 
     : (currentUser.first_name.charAt(0) + (currentUser.last_name ? currentUser.last_name.charAt(0) : ''));
   const ratePerHour = (state.settings.miningRatePerHour !== undefined ? state.settings.miningRatePerHour : 0.01) * state.user.level;
+  const maxCapacity = ratePerHour * (state.settings.maxMiningTimeHours !== undefined ? state.settings.maxMiningTimeHours : 24);
   const hashrate = state.user.level * 100;
+  const levelProgress = Math.min(100, (state.user.level / 10) * 100);
 
   return `
-    <div class="flex flex-col h-full pt-4 pb-4 px-5 relative bg-[#0a0a0f] overflow-y-auto hide-scrollbar z-0">
+    <div class="flex flex-col h-full pt-3 pb-6 px-4 relative bg-[#0a0a0f] overflow-y-auto hide-scrollbar z-0">
       
-      <!-- Ambient Background Glows -->
-      <div class="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none -z-10">
-         <div class="absolute -top-[10%] -left-[10%] w-[60%] h-[40%] bg-teal-500/10 rounded-full blur-[80px] animate-pulse"></div>
-         <div class="absolute top-[40%] -right-[20%] w-[60%] h-[40%] bg-blue-600/10 rounded-full blur-[100px]"></div>
+      <!-- MEGA BEAUTIFUL BACKGROUND -->
+      <div class="absolute inset-0 overflow-hidden pointer-events-none -z-10">
+         <div class="absolute -top-[20%] -left-[10%] w-[70%] h-[50%] bg-teal-500/10 rounded-full blur-[100px] animate-[pulse_6s_ease-in-out_infinite]"></div>
+         <div class="absolute top-[30%] -right-[20%] w-[60%] h-[60%] bg-blue-600/10 rounded-full blur-[120px] animate-[pulse_8s_ease-in-out_infinite]"></div>
+         <div class="absolute -bottom-[10%] left-[10%] w-[50%] h-[40%] bg-purple-500/10 rounded-full blur-[90px] animate-[pulse_7s_ease-in-out_infinite]"></div>
+         <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wMykiLz48L3N2Zz4=')] opacity-50"></div>
+         <div id="particles-layer" class="absolute inset-0 z-0 overflow-hidden pointer-events-none"></div>
       </div>
 
-      <!-- Live Feed Marquee -->
-      <div class="w-full bg-slate-900/80 border-b border-slate-800/50 py-1.5 px-4 mb-3 shrink-0 overflow-hidden relative z-10 flex items-center shadow-sm rounded-lg">
-        <i class="fas fa-broadcast-tower text-teal-400 text-[10px] mr-2 animate-pulse"></i>
-        <div class="flex-1 overflow-hidden relative h-4">
-          <div class="absolute whitespace-nowrap text-[9px] text-slate-400 font-medium animate-[marquee_15s_linear_infinite]" id="live-feed">
-            <span class="mx-4"><span class="text-white">@alex***</span> вывел <span class="text-teal-400 font-bold">15.50 USDT</span></span>
-            <span class="mx-4"><span class="text-white">@kris***</span> вывел <span class="text-teal-400 font-bold">5.00 USDT</span></span>
-            <span class="mx-4"><span class="text-white">@max***</span> вывел <span class="text-teal-400 font-bold">42.10 USDT</span></span>
-            <span class="mx-4"><span class="text-white">@ivan***</span> вывел <span class="text-teal-400 font-bold">11.00 USDT</span></span>
+      <!-- TOP HEADER (Profile & Live Feed) -->
+      <div class="flex flex-col space-y-3 mb-4 shrink-0 animate-slide-up relative z-10">
+        <!-- Live Feed Ticker -->
+        <div class="w-full bg-slate-900/60 backdrop-blur-md border border-slate-700/50 py-1.5 px-3 rounded-xl overflow-hidden relative flex items-center shadow-lg">
+          <div class="w-6 h-6 rounded-full bg-teal-500/20 flex items-center justify-center mr-2 shrink-0 border border-teal-500/30">
+            <i class="fas fa-satellite-dish text-teal-400 text-[10px] animate-ping opacity-75 absolute"></i>
+            <i class="fas fa-satellite-dish text-teal-400 text-[10px] relative z-10"></i>
+          </div>
+          <div class="flex-1 overflow-hidden relative h-4">
+            <div class="absolute whitespace-nowrap text-[10px] text-slate-300 font-medium animate-[marquee_20s_linear_infinite]" id="live-feed">
+              <span class="mx-4"><span class="text-white">@alex***</span> вывел <span class="text-teal-400 font-bold">15.50 USDT</span></span>
+              <span class="mx-4"><span class="text-white">@kris***</span> вывел <span class="text-teal-400 font-bold">5.00 USDT</span></span>
+              <span class="mx-4"><span class="text-white">@max***</span> вывел <span class="text-teal-400 font-bold">42.10 USDT</span></span>
+              <span class="mx-4"><span class="text-white">@ivan***</span> вывел <span class="text-teal-400 font-bold">11.00 USDT</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- User Mini Profile -->
+        <div class=" flex items-center justify-between bg-slate-800/40 backdrop-blur-xl p-2.5 rounded-2xl border border-slate-700/50 shadow-xl tap-effect">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-teal-400 to-blue-500 p-[2px] shadow-[0_0_15px_rgba(45,212,191,0.3)]">
+              <div class="w-full h-full rounded-full bg-slate-900 overflow-hidden border-2 border-slate-900 flex items-center justify-center text-white font-bold text-xs">
+                ${avatar}
+              </div>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-white font-black text-sm tracking-wide drop-shadow-md">${currentUser.first_name}</span>
+              <span class="text-slate-400 text-[10px] font-medium bg-slate-900/50 px-1.5 py-0.5 rounded inline-block w-max mt-0.5 border border-slate-800">Майнер PRO</span> 
+            </div>
+          </div>
+          <div class="text-right px-3 py-1.5 bg-slate-900/60 rounded-xl border border-slate-700/50 shadow-inner">
+            <p class="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-0.5">Баланс</p>
+            <p class="text-teal-400 font-black text-sm drop-shadow-sm leading-none"><span id="main-balance">${state.user.balance.toFixed(2)}</span> <span class="text-[9px] text-teal-500 align-top">USDT</span></p>
           </div>
         </div>
       </div>
 
-      <!-- Profile widget top-left -->
-      <div class="admin-trigger-zone animate-slide-up flex items-center space-x-2 mb-4 shrink-0 bg-slate-800/40 p-1.5 pr-3 rounded-full backdrop-blur-md border border-slate-700/50 w-max shadow-lg cursor-pointer hover:bg-slate-700/60 transition-colors">
-        <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-teal-400 to-blue-500 flex items-center justify-center text-white font-bold shadow-inner border border-slate-600 text-[10px] overflow-hidden">
-          ${avatar}
-        </div>
-        <div class="flex flex-col">
-          <span class="text-white font-bold text-xs leading-tight tracking-wide">${currentUser.first_name}</span>
-          <span class="text-teal-400 text-[10px] font-semibold leading-tight">Баланс: <span id="main-balance">${state.user.balance.toFixed(2)}</span></span> 
-        </div>
-      </div>
-
-      <!-- NEW Dynamic Cloud Miner Visual -->
-      <div class="flex-1 flex flex-col items-center justify-center relative w-full min-h-[260px] animate-slide-up delay-75 shrink-0 my-2">
-        <div class="relative w-full flex items-center justify-center float-anim">
+      <!-- MEGA BEAUTIFUL MINER CORE VISUAL -->
+      <div class="flex-1 flex flex-col items-center justify-center relative w-full min-h-[300px] animate-slide-up delay-75 shrink-0 my-2">
+        <div class="relative w-full flex items-center justify-center float-anim group">
           
-          <!-- Outer Tech Ring -->
-          <div class="absolute w-64 h-64 rounded-full border border-dashed border-slate-600/40 pointer-events-none" style="animation: spin-slow 25s linear infinite;"></div>
+          <!-- Outer Pulsing Aura -->
+          <div class="absolute w-72 h-72 rounded-full bg-teal-500/5 blur-2xl group-hover:bg-teal-500/10 transition-colors duration-700"></div>
+
+          <!-- Futuristic Outer Rings -->
+          <div class="absolute w-[280px] h-[280px] rounded-full border border-slate-700/30 border-dashed pointer-events-none" style="animation: spin-slow 30s linear infinite;"></div>
+          <div class="absolute w-[240px] h-[240px] rounded-full border-t border-l border-teal-500/30 pointer-events-none shadow-[0_0_30px_rgba(20,184,166,0.1)]" style="animation: spin-slow 20s linear infinite reverse;"></div>
+          <div class="absolute w-[200px] h-[200px] rounded-full border-b border-r border-blue-500/30 pointer-events-none" style="animation: spin-slow 15s linear infinite;"></div>
           
           <!-- Middle Accent Ring -->
-          <div class="absolute w-56 h-56 rounded-full border border-slate-700/50 ${skin.ring} pointer-events-none shadow-[0_0_15px_rgba(45,212,191,0.1)]" style="animation: spin-slow 15s linear infinite reverse;"></div>
+          <div class="absolute w-48 h-48 rounded-full border border-slate-700/80 ${skin.ring} pointer-events-none shadow-[0_0_20px_rgba(45,212,191,0.2)] ${state.user.isMinerActivated ? 'pulse-ring-anim' : ''}"></div>
           
-          <!-- Core Miner Container -->
-          <div class="relative z-10 w-48 h-48 rounded-full bg-gradient-to-b ${skin.colors} border-[4px] border-slate-700 shadow-[0_0_50px_rgba(20,184,166,0.15),inset_0_0_20px_rgba(0,0,0,0.8)] flex flex-col items-center justify-center overflow-hidden group">
+          <!-- Core Miner Container (3D Glassmorphism effect) -->
+          <div class="relative z-10 w-[170px] h-[170px] rounded-full bg-gradient-to-br ${skin.colors} p-1 shadow-[0_0_50px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(255,255,255,0.1)] flex flex-col items-center justify-center overflow-hidden" style="-webkit-mask-image: -webkit-radial-gradient(white, black);">
+            <div class="absolute inset-0 bg-black/40 rounded-full"></div>
             
             <!-- Inner Animated Core -->
-            <div class="absolute inset-0 flex items-center justify-center opacity-30">
-              <i class="fas ${skin.icon} text-[10rem] ${skin.iconColor}" style="animation: spin-slow 10s linear infinite;"></i>
+            <div class="absolute inset-0 flex items-center justify-center opacity-40" style="transform: translateZ(0);">
+              <i class="fas ${skin.icon} text-[12rem] ${skin.iconColor} blur-[2px]" style="${state.user.isMinerActivated ? 'animation: spin-slow 8s linear infinite;' : 'opacity:0;'}"></i>
+            </div>
+            <div class="absolute inset-0 flex items-center justify-center opacity-90" style="transform: translateZ(0);">
+              <i class="fas ${skin.icon} text-[9rem] ${skin.iconColor} drop-shadow-[0_0_15px_currentColor]" style="${state.user.isMinerActivated ? 'animation: spin-slow 8s linear infinite;' : 'opacity:0.2;'}"></i>
             </div>
             
-            <!-- Gradient Overlay -->
-            <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/60 to-transparent opacity-90"></div>
+            <!-- Dark Overlay for text contrast -->
+            <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/60 to-transparent opacity-90 rounded-full"></div>
             
             <!-- Text Content -->
-            <div class="relative z-20 flex flex-col items-center px-2 text-center mt-2">
-              <div class="w-8 h-8 rounded-full bg-teal-500/20 border border-teal-500/40 flex items-center justify-center mb-1 shadow-[0_0_10px_rgba(20,184,166,0.5)]">
-                <i class="fas fa-bolt text-teal-400 text-sm animate-pulse"></i>
+            <div class="relative z-20 flex flex-col items-center justify-end h-full pb-4 px-2 text-center w-full">
+              <div class="w-8 h-8 rounded-full bg-slate-900/80 border border-slate-700 flex items-center justify-center mb-1 shadow-inner relative">
+                ${state.user.isMinerActivated ? '<div class="absolute inset-0 bg-teal-500/20 rounded-full animate-ping"></div><i class="fas fa-bolt text-teal-400 drop-shadow-[0_0_5px_rgba(45,212,191,0.8)] text-sm relative z-10"></i>' : '<i class="fas fa-lock text-slate-500 text-sm"></i>'}
               </div>
-              <p id="mining-status-text" class="text-slate-400 text-[9px] uppercase tracking-widest mb-0.5 font-bold transition-colors">Намайнено</p>
-              <span class="text-3xl font-mono font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-teal-200 tracking-tight drop-shadow-lg transition-all" id="uncollected-balance">${state.user.uncollected.toFixed(6)}</span>
-              <span class="text-[10px] text-teal-400 font-bold mt-1 uppercase tracking-wider bg-teal-500/10 px-2 py-0.5 rounded-full border border-teal-500/20 shadow-inner">USDT</span>
-              <div class="text-[8px] text-slate-500 mt-2 font-mono bg-slate-900/50 px-2 py-0.5 rounded border border-slate-800">Максимум: <span id="max-capacity-display">${(ratePerHour * (state.settings.maxMiningTimeHours !== undefined ? state.settings.maxMiningTimeHours : 24)).toFixed(4)}</span></div>
+              <p id="mining-status-text" class="text-slate-300 text-[8px] uppercase tracking-widest mb-0.5 font-bold drop-shadow-md">${state.user.isMinerActivated ? 'Намайнено' : 'Ожидает активации'}</p>
+              
+              <!-- Mining Numbers -->
+              <div class="relative">
+                 <span class="text-3xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-b from-white to-teal-200 tracking-tight transition-all" id="uncollected-balance">${state.user.isMinerActivated ? state.user.uncollected.toFixed(6) : '0.000000'}</span>
+              </div>
+              
+              <div class="flex items-center space-x-1 mt-1">
+                <span class="text-[9px] text-teal-400 font-black uppercase tracking-wider bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20 shadow-inner backdrop-blur-sm">USDT</span>
+              </div>
             </div>
+          </div>
+          
+          <!-- Capacity Indicator Floating Badge -->
+          <div class="absolute -bottom-4 left-1/2 transform -translate-x-1/2 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-xl flex items-center space-x-2 z-20 w-max">
+             <i class="fas fa-battery-half text-slate-400 text-[10px]"></i>
+             <div class="text-[9px] text-slate-300 font-mono">Макс: <span class="text-white font-bold">${maxCapacity.toFixed(4)}</span></div>
           </div>
         </div>
       </div>
 
-      <!-- Collect Button (More engaging) -->
-      <div class="animate-slide-up delay-150 w-full mb-5 shrink-0 mt-4 relative z-10">
-        <button id="collect-btn" class="w-full py-4 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white rounded-2xl font-black text-base shadow-[0_10px_25px_rgba(20,184,166,0.25)] tap-effect uppercase tracking-wider relative overflow-hidden group border border-teal-400/50">
+      <!-- ACTION BUTTONS SECTION -->
+      <div class="animate-slide-up delay-150 w-full mb-4 shrink-0 mt-6 relative z-10">
+        ${!state.user.isMinerActivated ? `
+        <button id="activate-miner-btn" class="w-full py-4 bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white rounded-2xl font-black text-sm shadow-[0_10px_30px_rgba(225,29,72,0.3)] tap-effect uppercase tracking-widest relative overflow-hidden group border border-pink-400/50 flex flex-col items-center justify-center">
+          <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4xKSIvPjwvc3ZnPg==')] opacity-50"></div>
           <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
-          <span class="relative z-10 flex items-center justify-center drop-shadow-md">
-            <i class="fas fa-hand-holding-usd mr-2 text-lg"></i> Собрать прибыль
+          <span class="relative z-10 flex items-center drop-shadow-md text-base mb-0.5">
+            <i class="fas fa-rocket mr-2 animate-bounce"></i> Запустить майнер
+          </span>
+          <span class="relative z-10 text-[9px] text-pink-100/80 bg-black/20 px-2 py-0.5 rounded uppercase tracking-wider">Цена: 3 USDT</span>
+        </button>
+        ` : `
+        <button id="collect-btn" class="w-full py-4 bg-gradient-to-r from-teal-500 via-emerald-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white rounded-2xl font-black text-base shadow-[0_10px_30px_rgba(20,184,166,0.3)] tap-effect uppercase tracking-widest relative overflow-hidden group border border-teal-300/50 bg-[length:200%_auto] animate-[gradient_3s_ease_infinite]">
+          <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4xKSIvPjwvc3ZnPg==')] opacity-50"></div>
+          <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
+          <span class="relative z-10 flex items-center justify-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+            <i class="fas fa-hand-holding-usd mr-2 text-xl drop-shadow-md"></i> Собрать прибыль
           </span>
         </button>
+        `}
       </div>
 
-      <!-- Miner Stats & Upgrade Panel (Glassmorphism) -->
-      <div class="w-full mt-auto bg-slate-800/40 p-4 rounded-3xl border border-slate-600/30 backdrop-blur-xl shadow-2xl animate-slide-up delay-225 shrink-0 relative z-10">
-        <div class="flex justify-between items-center mb-4">
+      <!-- PREMIUM STATS & UPGRADE PANEL -->
+      <div class="w-full mt-auto bg-slate-800/60 p-4 rounded-3xl border border-slate-700/50 backdrop-blur-2xl shadow-2xl animate-slide-up delay-225 shrink-0 relative z-10 overflow-hidden group">
+        <div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-teal-500/5 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"></div>
+        
+        <div class="flex justify-between items-center mb-4 relative z-10">
           <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-xl bg-slate-900/80 border border-slate-700/50 flex items-center justify-center text-teal-400 shadow-inner">
-              <i class="fas fa-server text-lg"></i>
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 flex items-center justify-center text-teal-400 shadow-inner relative overflow-hidden">
+              <i class="fas fa-server text-xl relative z-10 drop-shadow-md"></i>
+              <div class="absolute bottom-0 w-full bg-teal-500/20" style="height: ${levelProgress}%"></div>
             </div>
             <div>
-              <p class="text-white font-black text-sm drop-shadow-sm">${hashrate} GH/s</p>
-              <p class="text-slate-400 text-[10px] uppercase mt-0.5 tracking-wider font-semibold">Уровень ${state.user.level} / 10</p>
+              <p class="text-white font-black text-base drop-shadow-sm leading-none mb-1">${hashrate} <span class="text-xs text-slate-400 font-bold">GH/s</span></p>
+              <div class="flex items-center space-x-2">
+                 <p class="text-teal-400 bg-teal-500/10 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider font-bold border border-teal-500/20">Ур. ${state.user.level} / 10</p>
+                 <span class="text-[9px] text-slate-500 font-mono">+${ratePerHour.toFixed(3)}/ч</span>
+              </div>
             </div>
           </div>
-          <div class="text-right bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-700/50">
-            <p class="text-teal-400 font-black text-xs drop-shadow-sm">+${ratePerHour.toFixed(3)}</p>
-            <p class="text-slate-500 text-[8px] uppercase tracking-widest font-bold mt-0.5">USDT / ч</p>
+          <div class="text-right">
+             <button onclick="window.openSkinsModal()" class="w-10 h-10 bg-slate-900/80 hover:bg-slate-800 text-pink-400 rounded-xl font-bold transition-colors tap-effect flex justify-center items-center border border-slate-700 shadow-inner group-hover:border-pink-500/30">
+               <i class="fas fa-paint-brush"></i>
+             </button>
           </div>
         </div>
         
-        <div class="flex space-x-2">
-          <button id="upgrade-btn" class="flex-1 py-3 bg-slate-900/80 hover:bg-slate-800 text-white rounded-xl font-bold text-[11px] transition-colors tap-effect flex justify-center items-center border border-slate-600/50 shadow-inner disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden" ${state.user.level >= 10 ? 'disabled' : ''}>
+        <div class="relative z-10">
+          <button id="upgrade-btn" class="w-full py-3.5 bg-slate-900/80 hover:bg-slate-800 text-white rounded-xl font-black text-xs transition-colors tap-effect flex justify-between items-center px-4 border border-slate-600/50 shadow-inner disabled:opacity-50 disabled:cursor-not-allowed group/btn relative overflow-hidden" ${state.user.level >= 10 ? 'disabled' : ''}>
+            <div class="absolute inset-0 bg-gradient-to-r from-teal-500/0 via-teal-500/10 to-teal-500/0 transform -translate-x-full group-hover/btn:animate-[shimmer_2s_infinite]"></div>
             ${state.user.level >= 10 
-              ? '<span><i class="fas fa-star text-yellow-400 mr-1 group-hover:scale-110 transition-transform"></i> Макс. уровень</span>' 
-              : `<span class="relative z-10 flex items-center"><i class="fas fa-arrow-up text-teal-400 mr-1"></i> Улучшить</span> <span class="relative z-10 bg-teal-500/20 px-1.5 py-0.5 rounded text-teal-300 text-[9px] ml-1.5 border border-teal-500/30 shadow-sm">${getUpgradeCost(state.user.level)} USDT</span>`}
-          </button>
-          <button onclick="window.openSkinsModal()" class="w-12 shrink-0 py-3 bg-slate-900/80 hover:bg-slate-800 text-pink-400 rounded-xl font-bold transition-colors tap-effect flex justify-center items-center border border-slate-600/50 shadow-inner group">
-            <i class="fas fa-paint-brush group-hover:scale-110 transition-transform"></i>
+              ? '<span class="mx-auto flex items-center text-yellow-400"><i class="fas fa-crown mr-2"></i> Максимальный уровень</span>' 
+              : `<span class="flex items-center text-slate-300"><i class="fas fa-arrow-circle-up text-teal-400 mr-2 text-lg group-hover/btn:-translate-y-1 transition-transform"></i> Улучшить мощность</span> 
+                 <span class="bg-teal-500 text-slate-900 px-3 py-1 rounded-lg text-[11px] border border-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.3)]">${getUpgradeCost(state.user.level)} USDT</span>`}
           </button>
         </div>
       </div>
@@ -726,11 +840,31 @@ function renderHome() {
 
 function attachHomeEvents() {
   const collectBtn = document.getElementById('collect-btn');
+  const activateBtn = document.getElementById('activate-miner-btn');
   const upgradeBtn = document.getElementById('upgrade-btn');
   const mainBalance = document.getElementById('main-balance');
   const uncolEl = document.getElementById('uncollected-balance');
+  if (typeof startHomeParticles === 'function') startHomeParticles();
 
-  collectBtn.addEventListener('click', (e) => {
+  if (activateBtn) {
+    activateBtn.addEventListener('click', () => {
+      const cost = 3.00;
+      if (state.user.balance >= cost) {
+        triggerHaptic('heavy');
+        state.user.balance -= cost;
+        state.user.isMinerActivated = true;
+        state.user.lastSync = Date.now(); // Время добычи пойдет с этой секунды
+        saveState();
+        showToast('🚀 Майнер успешно активирован!');
+        renderTab('home');
+      } else {
+        triggerHaptic('error');
+        showToast(`Недостаточно средств. Нужно еще ${(cost - state.user.balance).toFixed(2)} USDT`);
+      }
+    });
+  }
+
+  if (collectBtn) collectBtn.addEventListener('click', (e) => {
     if (state.user.uncollected < 0.00001) {
        showToast("Пока нечего собирать!");
        triggerHaptic('error');
@@ -784,6 +918,7 @@ function attachHomeEvents() {
     headerBalance.textContent = `${state.user.balance.toFixed(2)} USDT`;
     
     showFloatingNumber(e.clientX || window.innerWidth/2, e.clientY || window.innerHeight/2, `+${amount.toFixed(4)}`);
+    if (typeof spawnCoins === 'function') spawnCoins(e.clientX || window.innerWidth/2, e.clientY || window.innerHeight/2, mainBalance);
     saveState();
   });
 
@@ -811,39 +946,46 @@ function attachHomeEvents() {
 function renderTasks() {
   let html = `
     <div class="px-4 pt-4 pb-6 h-full overflow-y-auto hide-scrollbar">
-      <!-- Premium Hero Banner -->
-      <div class="relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-3xl p-5 border border-slate-700/50 shadow-lg mb-5 mt-1 overflow-hidden animate-slide-up group">
-        <div class="absolute -right-10 -top-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/20 transition-colors duration-700"></div>
-        <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-teal-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
-        <div class="flex items-center space-x-4 relative z-10">
-          <div class="w-14 h-14 bg-gradient-to-br from-blue-500 to-teal-400 rounded-2xl flex items-center justify-center text-2xl text-white shadow-[0_0_20px_rgba(236,72,153,0.3)] border border-blue-400/30 float-anim shrink-0 transform -rotate-3">
-            <i class="fas fa-rocket drop-shadow-md"></i>
+      <!-- MEGA BEAUTIFUL HERO BANNER -->
+      <div class="relative rounded-[2rem] p-6 mb-5 overflow-hidden shadow-2xl border border-white/10 animate-slide-up group" style="background: radial-gradient(circle at top left, #1e3a8a, #0f172a);">
+        <!-- Animated abstract shapes -->
+        <div class="absolute -right-10 -top-10 w-48 h-48 bg-teal-500/20 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/30 transition-colors duration-700"></div>
+        <div class="absolute -left-10 -bottom-10 w-40 h-40 bg-blue-500/20 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/30 transition-colors duration-700"></div>
+        
+        <div class="relative z-10 flex flex-col items-center text-center">
+          <div class="w-20 h-20 mb-4 bg-gradient-to-tr from-blue-500 to-teal-400 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(45,212,191,0.4)] border-4 border-slate-900/50 float-anim relative">
+            <i class="fas fa-rocket text-4xl text-white drop-shadow-lg transform -rotate-12 group-hover:rotate-12 transition-transform duration-500"></i>
+            <div class="absolute -bottom-1 -left-1 w-6 h-6 bg-yellow-400 rounded-full border-2 border-slate-900 flex items-center justify-center animate-bounce shadow-sm delay-150">
+              <i class="fas fa-bolt text-[10px] text-yellow-900"></i>
+            </div>
           </div>
-          <div>
-            <h2 class="text-xl font-black text-white mb-1 tracking-tight">Миссии</h2>
-            <p class="text-slate-300 text-[11px] leading-relaxed">Выполняй задания и получай <span class="bg-teal-500/20 text-teal-300 px-1 py-0.5 rounded font-bold">USDT</span> на баланс!</p>
-          </div>
+          <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-blue-200 tracking-tight mb-2">Миссии</h2>
+          <p class="text-blue-100/80 text-[11px] leading-relaxed max-w-[220px]">
+            Выполняй задания и получай <span class="bg-white/10 text-white font-bold px-1.5 py-0.5 rounded shadow-sm">USDT</span> прямо на баланс!
+          </p>
         </div>
       </div>
 
-      <div class="flex justify-between items-end mb-3 px-1 animate-slide-up delay-75">
+      <!-- HEADER WITH ACHIEVEMENTS BTN -->
+      <div class="flex justify-between items-end mb-4 px-1 animate-slide-up delay-75">
         <h3 class="font-bold text-white text-sm">Доступные задания</h3>
-        <button onclick="window.openAchievementsModal()" class="text-[10px] bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 px-3 py-1.5 rounded-lg font-bold shadow-inner tap-effect hover:bg-yellow-500/20 flex items-center transition-colors">
-          <i class="fas fa-medal mr-1.5"></i> Ачивки
+        <button onclick="window.openAchievementsModal()" class="text-[10px] bg-gradient-to-r from-yellow-500 to-orange-500 text-slate-900 px-3 py-1.5 rounded-xl font-black shadow-[0_0_15px_rgba(234,179,8,0.3)] tap-effect hover:scale-105 transition-transform flex items-center uppercase tracking-wide">
+          <i class="fas fa-medal mr-1.5 text-yellow-100"></i> Ачивки
         </button>
       </div>
-      <div class="space-y-3 pb-20">
+      
+      <div class="space-y-3.5 pb-20">
   `;
 
   if(state.tasks.length === 0) {
       html += `
-        <div class="animate-slide-up delay-150 text-center py-10 bg-slate-850 rounded-3xl border border-slate-700/50 shadow-inner">
-          <div class="w-16 h-16 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-4 text-slate-600 shadow-inner border border-slate-700">
+        <div class="animate-slide-up delay-150 text-center py-12 bg-slate-800/40 backdrop-blur-xl rounded-3xl border border-slate-700/50 shadow-inner relative overflow-hidden">
+          <div class="absolute inset-0 bg-gradient-to-b from-transparent to-slate-900/80 pointer-events-none"></div>
+          <div class="w-16 h-16 mx-auto bg-slate-900 rounded-full flex items-center justify-center mb-4 text-slate-600 shadow-inner border border-slate-800 relative z-10">
             <i class="fas fa-check-double text-2xl"></i>
           </div>
-          <h3 class="text-white font-bold text-sm mb-1">Всё выполнено!</h3>
-          <p class="text-slate-500 text-xs px-4">Вы сделали все доступные задания.<br>Новые появятся совсем скоро.</p>
+          <h3 class="text-white font-bold text-sm mb-1 relative z-10">Всё выполнено!</h3>
+          <p class="text-slate-500 text-[10px] px-8 relative z-10">Вы сделали все доступные задания.<br>Новые появятся совсем скоро.</p>
         </div>
       `;
   }
@@ -853,47 +995,57 @@ function renderTasks() {
     let statusBadge = ''; let btnClass = ''; let btnText = '';
     let isFull = task.maxUses > 0 && (task.currentUses || 0) >= task.maxUses;
     let isDisabled = false;
+    let cardBorder = 'border-slate-700/50';
+    let cardHover = 'hover:border-blue-500/40';
 
     if (isFull && task.status !== 'completed' && task.status !== 'checking' && task.status !== 'verify') {
-      statusBadge = '<span class="px-2 py-0.5 bg-red-500/10 text-red-400 text-[9px] rounded-md font-bold border border-red-500/20">Мест нет</span>';
+      statusBadge = '<span class="px-2 py-0.5 bg-red-500/10 text-red-400 text-[9px] rounded-md font-bold border border-red-500/20 uppercase tracking-widest"><i class="fas fa-ban mr-1"></i>Мест нет</span>';
       btnClass = 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700';
       btnText = 'Завершено';
       isDisabled = true;
     } else if (task.status === 'todo') {
-      statusBadge = '<span class="px-2 py-0.5 bg-slate-700 text-slate-300 text-[9px] rounded-md font-bold border border-slate-600">Новое</span>';
-      btnClass = 'bg-gradient-to-r from-teal-500 to-blue-500 text-white hover:from-teal-400 hover:to-blue-400 shadow-lg shadow-teal-500/20 border border-teal-400/50';
+      statusBadge = '<span class="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] rounded-md font-bold border border-blue-500/20 uppercase tracking-widest"><i class="fas fa-star mr-1"></i>Новое</span>';
+      btnClass = 'bg-gradient-to-r from-teal-500 to-blue-500 text-white hover:from-teal-400 hover:to-blue-400 shadow-[0_5px_15px_rgba(20,184,166,0.3)] border border-teal-400/50';
       btnText = 'Начать';
     } else if (task.status === 'verify') {
-      statusBadge = '<span class="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] rounded-md font-bold border border-blue-500/20">Проверить</span>';
-      btnClass = 'bg-blue-500 text-white hover:bg-blue-400 shadow-lg shadow-blue-500/20 border border-blue-400/50';
+      statusBadge = '<span class="px-2 py-0.5 bg-purple-500/10 text-purple-400 text-[9px] rounded-md font-bold border border-purple-500/20 uppercase tracking-widest">Проверить</span>';
+      btnClass = 'bg-purple-500 text-white hover:bg-purple-400 shadow-[0_5px_15px_rgba(168,85,247,0.3)] border border-purple-400/50';
       btnText = 'Проверить';
+      cardBorder = 'border-purple-500/30';
+      cardHover = 'hover:border-purple-500/60';
     } else if (task.status === 'checking') {
-      statusBadge = '<span class="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 text-[9px] rounded-md font-bold border border-yellow-500/20">Проверка</span>';
+      statusBadge = '<span class="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 text-[9px] rounded-md font-bold border border-yellow-500/20 uppercase tracking-widest">В процессе</span>';
       btnClass = 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700';
-      btnText = '<i class="fas fa-spinner fa-spin"></i>';
+      btnText = '<i class="fas fa-circle-notch fa-spin text-lg"></i>';
+      cardBorder = 'border-yellow-500/30';
     } else if (task.status === 'completed') {
-      statusBadge = '<span class="px-2 py-0.5 bg-teal-500/10 text-teal-400 text-[9px] rounded-md font-bold border border-teal-500/20">Выполнено</span>';
+      statusBadge = '<span class="px-2 py-0.5 bg-teal-500/10 text-teal-400 text-[9px] rounded-md font-bold border border-teal-500/20 uppercase tracking-widest">Выполнено</span>';
       btnClass = 'bg-teal-500/10 text-teal-400 cursor-not-allowed border border-teal-500/30';
-      btnText = '<i class="fas fa-check"></i>';
+      btnText = '<i class="fas fa-check text-lg"></i>';
+      cardBorder = 'border-teal-500/30 bg-teal-500/5';
+      cardHover = '';
     }
 
     html += `
-      <div class="animate-slide-up bg-slate-850 rounded-2xl p-3.5 flex items-center justify-between border border-slate-700/50 shadow-sm transition-all tap-effect hover:border-blue-500/30 group relative overflow-hidden" style="animation-delay: ${delay}ms">
-        <div class="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+      <div class="animate-slide-up bg-slate-800/60 backdrop-blur-xl rounded-[1.25rem] p-4 flex items-center justify-between border ${cardBorder} shadow-sm transition-all tap-effect ${cardHover} group relative overflow-hidden" style="animation-delay: ${delay}ms">
+        <div class="absolute inset-0 bg-gradient-to-r from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
 
-        <div class="flex items-center space-x-3.5 w-full relative z-10 pr-2">
-          <div class="w-12 h-12 rounded-xl bg-slate-900 flex items-center justify-center text-2xl text-white shadow-inner shrink-0 border border-slate-700 group-hover:scale-110 group-hover:border-blue-500/50 transition-all duration-300">
-            <i class="fab ${task.icon} text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-teal-400"></i>
+        <div class="flex items-center space-x-4 w-full relative z-10 pr-3">
+          <div class="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center text-3xl text-white shadow-inner shrink-0 border border-slate-700/80 group-hover:scale-105 transition-transform duration-300 relative overflow-hidden">
+            <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none"></div>
+            <i class="fab ${task.icon} text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-teal-400 drop-shadow-sm"></i>
           </div>
           <div class="min-w-0 flex-1">
-            <h3 class="font-bold text-sm text-white mb-1 truncate w-full" title="${task.title}">${task.title}</h3>
-            <div class="flex items-center space-x-2">
-              <span class="text-teal-400 font-black text-[10px] bg-teal-500/10 px-1.5 py-0.5 rounded-md border border-teal-500/20">+${task.reward.toFixed(2)} USDT</span>
+            <h3 class="font-black text-[13px] text-white mb-1.5 truncate w-full tracking-wide" title="${task.title}">${task.title}</h3>
+            <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+              <span class="text-white font-black text-[11px] bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-700 shadow-inner flex items-center">
+                <span class="text-teal-400 mr-1">+${task.reward.toFixed(2)}</span> <span class="text-[9px] text-slate-500">USDT</span>
+              </span>
               ${statusBadge}
             </div>
           </div>
         </div>
-        <button class="task-action-btn px-4 py-2.5 rounded-xl font-black text-xs transition-all shrink-0 ml-1 relative z-10 uppercase tracking-wide ${btnClass}" data-id="${task.id}" ${isDisabled || ['checking', 'completed'].includes(task.status) ? 'disabled' : ''}>
+        <button class="task-action-btn w-24 py-3 rounded-xl font-black text-[11px] transition-all shrink-0 ml-1 relative z-10 uppercase tracking-wider flex justify-center items-center ${btnClass}" data-id="${task.id}" ${isDisabled || ['checking', 'completed'].includes(task.status) ? 'disabled' : ''}>
           ${btnText}
         </button>
       </div>
@@ -938,20 +1090,16 @@ function attachTaskEvents() {
             state.user.balance += state.tasks[taskIndex].reward;
             state.user.totalEarned += state.tasks[taskIndex].reward;
 
-            // Global counter increment
-            if (currentUser.id !== ADMIN_ID) {
-               User.findOne({ id: ADMIN_ID }).then(adminDoc => {
-                  if(adminDoc && adminDoc.data && adminDoc.data.tasks) {
-                      const gTask = adminDoc.data.tasks.find(t => t.id === taskId);
-                      if(gTask) {
-                          gTask.currentUses = (gTask.currentUses || 0) + 1;
-                          User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });
-                      }
-                  }
-               });
-            } else {
-               state.tasks[taskIndex].currentUses = (state.tasks[taskIndex].currentUses || 0) + 1;
-            }
+                        // Global counter increment
+            SettingsAPI.get().then(globalData => {
+               if(globalData && globalData.tasks) {
+                   const gTask = globalData.tasks.find(t => t.id === taskId);
+                   if(gTask) {
+                       gTask.currentUses = (gTask.currentUses || 0) + 1;
+                       SettingsAPI.update(globalData);
+                   }
+               }
+            });
 
             showToast(`Награда получена: +${state.tasks[taskIndex].reward} USDT!`);
             triggerHaptic('success');
@@ -980,90 +1128,118 @@ function renderFriends() {
 
   let html = `
     <div class="px-4 pt-4 pb-6 h-full overflow-y-auto hide-scrollbar">
-      <!-- Premium Banner -->
-      <div class="relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-3xl p-6 border border-slate-700/50 shadow-lg mb-5 mt-1 overflow-hidden animate-slide-up group">
-        <div class="absolute -right-10 -top-10 w-40 h-40 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors duration-700"></div>
-        <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
-
-        <div class="flex flex-col items-center text-center relative z-10">
-          <div class="w-16 h-16 mx-auto bg-gradient-to-br from-teal-400 to-blue-500 rounded-2xl flex items-center justify-center text-3xl text-white mb-4 shadow-[0_0_25px_rgba(168,85,247,0.3)] border border-teal-400/30 float-anim transform rotate-3">
-            <i class="fas fa-gift drop-shadow-md -rotate-3"></i>
+      
+      <!-- MEGA BEAUTIFUL HERO BANNER -->
+      <div class="relative rounded-[2rem] p-6 mb-5 overflow-hidden shadow-2xl border border-white/10 animate-slide-up group" style="background: radial-gradient(circle at top right, #3b0764, #0f172a);">
+        <!-- Animated abstract shapes -->
+        <div class="absolute -right-10 -top-10 w-48 h-48 bg-pink-500/20 rounded-full blur-3xl pointer-events-none group-hover:bg-pink-500/30 transition-colors duration-700"></div>
+        <div class="absolute -left-10 -bottom-10 w-40 h-40 bg-blue-500/20 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/30 transition-colors duration-700"></div>
+        
+        <div class="relative z-10 flex flex-col items-center text-center">
+          <div class="w-20 h-20 mb-4 bg-gradient-to-tr from-pink-500 to-purple-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(219,39,119,0.4)] border-4 border-slate-900/50 float-anim relative">
+            <i class="fas fa-gift text-4xl text-white drop-shadow-lg"></i>
+            <div class="absolute -top-1 -right-1 w-6 h-6 bg-yellow-400 rounded-full border-2 border-slate-900 flex items-center justify-center animate-bounce shadow-sm">
+              <i class="fas fa-star text-[10px] text-yellow-900"></i>
+            </div>
           </div>
-          <h2 class="text-2xl font-black text-white mb-2 tracking-tight">Пригласить друзей</h2>
-          <p class="text-slate-300 text-xs px-2 leading-relaxed">Получай <span class="bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded font-bold">${refFixed} USDT</span> сразу и <span class="bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold">${refPercent}%</span> от их майнинга!</p>
+          <h2 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-pink-200 tracking-tight mb-2">Зови друзей</h2>
+          <p class="text-pink-100/80 text-[11px] leading-relaxed max-w-[220px]">
+            Получай <span class="bg-white/10 text-white font-bold px-1.5 py-0.5 rounded shadow-sm">${refFixed} USDT</span> сразу и <span class="bg-white/10 text-white font-bold px-1.5 py-0.5 rounded shadow-sm">${refPercent}%</span> от их добычи пожизненно!
+          </p>
         </div>
       </div>
       
-      <!-- Stats -->
-      <div class="grid grid-cols-2 gap-3 mb-5 animate-slide-up delay-75">
-        <div class="bg-slate-850 p-3.5 rounded-2xl border border-slate-700/50 text-center shadow-md relative overflow-hidden group hover:border-blue-500/30 transition-colors">
-          <div class="absolute inset-0 bg-blue-500/5 pointer-events-none"></div>
-          <p class="text-[9px] text-slate-400 mb-1.5 uppercase tracking-widest font-bold">Приглашено</p>
-          <div class="flex justify-center items-center">
-            <span class="text-2xl font-black text-white leading-none">${state.friends.length}</span>
-            <i class="fas fa-user-friends text-xs text-blue-400 ml-2"></i>
-          </div>
+      <!-- HOW IT WORKS WIDGET -->
+      <div class="bg-slate-800/40 backdrop-blur-xl p-3 rounded-2xl mb-5 border border-slate-700/50 shadow-inner flex justify-between items-center animate-slide-up delay-75 relative overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-pink-500/5 pointer-events-none"></div>
+        <div class="flex flex-col items-center relative z-10 w-1/3">
+          <div class="w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-1.5 text-blue-400"><i class="fas fa-paper-plane text-sm"></i></div>
+          <p class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Отправь</p>
         </div>
-        <div class="bg-slate-850 p-3.5 rounded-2xl border border-slate-700/50 text-center shadow-md relative overflow-hidden group hover:border-teal-500/30 transition-colors">
-          <div class="absolute inset-0 bg-teal-500/5 pointer-events-none"></div>
-          <p class="text-[9px] text-slate-400 mb-1.5 uppercase tracking-widest font-bold">Заработано</p>
-          <div class="flex justify-center items-center">
-            <span class="text-2xl font-black text-teal-400 leading-none">+${state.friends.reduce((sum, f) => sum + f.earned, 0).toFixed(2)}</span>
-            <i class="fas fa-coins text-xs text-teal-500 ml-2 opacity-50"></i>
+        <i class="fas fa-chevron-right text-slate-600 text-xs relative z-10"></i>
+        <div class="flex flex-col items-center relative z-10 w-1/3">
+          <div class="w-10 h-10 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mb-1.5 text-purple-400"><i class="fas fa-user-plus text-sm"></i></div>
+          <p class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Пригласи</p>
+        </div>
+        <i class="fas fa-chevron-right text-slate-600 text-xs relative z-10"></i>
+        <div class="flex flex-col items-center relative z-10 w-1/3">
+          <div class="w-10 h-10 rounded-full bg-teal-500/10 border border-teal-500/20 flex items-center justify-center mb-1.5 text-teal-400"><i class="fas fa-coins text-sm"></i></div>
+          <p class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Получи</p>
+        </div>
+      </div>
+      
+      <!-- STATS CARDS -->
+      <div class="grid grid-cols-2 gap-3 mb-5 animate-slide-up delay-150">
+        <div class="bg-slate-800/60 backdrop-blur-xl p-4 rounded-2xl border border-slate-700/50 relative overflow-hidden group hover:border-blue-500/40 transition-all">
+          <div class="absolute -right-6 -top-6 w-20 h-20 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-colors"></div>
+          <p class="text-[9px] text-slate-400 mb-1 uppercase tracking-widest font-bold flex items-center"><i class="fas fa-users mr-1.5 text-blue-500/50"></i>Приглашено</p>
+          <div class="text-3xl font-black text-white drop-shadow-md">${state.friends.length}</div>
+        </div>
+        <div class="bg-slate-800/60 backdrop-blur-xl p-4 rounded-2xl border border-slate-700/50 relative overflow-hidden group hover:border-teal-500/40 transition-all">
+          <div class="absolute -right-6 -top-6 w-20 h-20 bg-teal-500/10 rounded-full blur-2xl group-hover:bg-teal-500/20 transition-colors"></div>
+          <p class="text-[9px] text-slate-400 mb-1 uppercase tracking-widest font-bold flex items-center"><i class="fas fa-wallet mr-1.5 text-teal-500/50"></i>Доход</p>
+          <div class="text-xl font-black text-teal-400 drop-shadow-md flex items-end h-[36px]">
+            +${state.friends.reduce((sum, f) => sum + f.earned, 0).toFixed(2)} <span class="text-[10px] text-teal-500 font-bold ml-1 mb-1">USDT</span>
           </div>
         </div>
       </div>
       
-      <div class="animate-slide-up delay-150 mb-4">
-        <button id="copy-link-btn" class="w-full py-3.5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-2xl font-black text-sm transition-colors tap-effect shadow-[0_0_20px_rgba(168,85,247,0.2)] flex items-center justify-center space-x-2 uppercase tracking-wide">
-          <i class="fas fa-link text-lg"></i>
-          <span>Копировать ссылку</span>
+      <!-- MEGA BUTTON -->
+      <div class="animate-slide-up delay-225 mb-5 relative">
+        <div class="absolute inset-0 bg-gradient-to-r from-pink-500 to-purple-500 rounded-2xl blur-lg opacity-40 animate-pulse pointer-events-none"></div>
+        <button id="copy-link-btn" class="w-full py-4 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white rounded-2xl font-black text-sm transition-all tap-effect shadow-[0_0_20px_rgba(219,39,119,0.3)] flex items-center justify-center space-x-2 uppercase tracking-wide relative overflow-hidden group border border-pink-400/50">
+          <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
+          <i class="fas fa-paper-plane text-lg relative z-10"></i>
+          <span class="relative z-10 drop-shadow-md">Отправить приглашение</span>
         </button>
       </div>
 
       ${currentUser.username && currentUser.username.startsWith('web_') ? `
       <div class="mb-5 p-3 bg-slate-850 border border-slate-700 rounded-xl shadow-inner animate-slide-up delay-225 flex justify-between items-center">
-        <p class="text-[9px] text-teal-400 font-bold uppercase tracking-wider m-0"><i class="fas fa-info-circle mr-1"></i> Тестовый режим</p>
+        <p class="text-[9px] text-teal-400 font-bold uppercase tracking-wider m-0"><i class="fas fa-info-circle mr-1"></i> Тест. режим</p>
         <button id="test-ref-btn" class="px-3 py-1.5 bg-slate-800 text-white border border-slate-600 rounded-lg font-bold text-[10px] hover:bg-slate-700 transition-colors tap-effect shadow-sm">
           <i class="fas fa-user-plus mr-1 text-teal-400"></i>Добавить реферала
         </button>
       </div>` : ''}
       
+      <!-- FRIENDS LIST -->
       <div class="animate-slide-up delay-300">
         <div class="flex justify-between items-end mb-3 px-1">
           <h3 class="font-bold text-white text-sm">Ваши друзья</h3>
-          <button id="top-refs-btn" class="text-xs text-teal-400 font-bold bg-teal-500/10 px-3 py-1.5 rounded-lg border border-teal-500/30 tap-effect flex items-center shadow-sm hover:bg-teal-500/20 transition-colors">
-            <i class="fas fa-trophy mr-1.5 text-yellow-400"></i> Топ лидеров
+          <button id="top-refs-btn" class="text-[10px] text-yellow-400 font-bold bg-yellow-500/10 px-3 py-1.5 rounded-lg border border-yellow-500/30 tap-effect flex items-center shadow-sm hover:bg-yellow-500/20 transition-colors uppercase tracking-wider">
+            <i class="fas fa-crown mr-1.5"></i> Топ лидеров
           </button>
         </div>
-        <div class="space-y-2 pb-20">
+        <div class="space-y-2.5 pb-20">
   `;
 
   if (state.friends.length === 0) {
     html += `
-      <div class="text-center py-8 bg-slate-850 rounded-2xl border border-slate-700/50 shadow-inner">
-        <div class="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-3 text-slate-600">
-          <i class="fas fa-user-plus text-xl"></i>
+      <div class="text-center py-10 bg-slate-800/40 backdrop-blur-xl rounded-3xl border border-slate-700/50 shadow-inner relative overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-b from-transparent to-slate-900/80 pointer-events-none"></div>
+        <div class="w-16 h-16 mx-auto bg-slate-900 rounded-full flex items-center justify-center mb-4 text-slate-600 border border-slate-800 shadow-inner relative z-10">
+          <i class="fas fa-user-clock text-2xl"></i>
         </div>
-        <p class="text-slate-400 font-medium text-xs">Вы пока не пригласили друзей.</p>
-        <p class="text-slate-500 text-[10px] mt-1">Отправьте ссылку и начните зарабатывать вместе!</p>
+        <p class="text-white font-bold text-sm relative z-10">Список пуст</p>
+        <p class="text-slate-500 text-[10px] mt-1 px-8 relative z-10">Пока никто не присоединился. Отправьте ссылку друзьям!</p>
       </div>
     `;
   } else {
     currentFriends.forEach(friend => {
       html += `
-        <div class="bg-slate-850 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 transition-colors tap-effect">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-sm font-bold text-white shadow-inner border border-slate-600 shrink-0">
+        <div class="bg-slate-800/40 backdrop-blur-xl p-3.5 rounded-2xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 hover:bg-slate-800/80 transition-all tap-effect group">
+          <div class="flex items-center space-x-3.5 min-w-0">
+            <div class="w-11 h-11 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-sm font-black text-white shadow-inner border border-slate-600 shrink-0 relative overflow-hidden group-hover:scale-105 transition-transform">
               ${friend.name.charAt(0)}
+              <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent"></div>
             </div>
             <div class="min-w-0">
-              <p class="font-bold text-xs text-white truncate max-w-[140px]">${friend.name}</p>
-              <p class="text-[9px] text-slate-500 mt-0.5"><i class="fas fa-calendar-alt mr-1 opacity-50"></i>${friend.date}</p>
+              <p class="font-bold text-xs text-white truncate max-w-[130px] tracking-wide">${friend.name}</p>
+              <p class="text-[9px] text-slate-500 mt-0.5 font-mono bg-slate-900/50 inline-block px-1.5 py-0.5 rounded"><i class="fas fa-calendar-alt mr-1 opacity-50"></i>${friend.date}</p>
             </div>
           </div>
-          <div class="text-right shrink-0 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
-            <p class="text-teal-400 font-black text-xs">+${friend.earned.toFixed(2)}</p>
+          <div class="text-right shrink-0 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 shadow-inner group-hover:border-teal-500/30 transition-colors">
+            <p class="text-teal-400 font-black text-xs drop-shadow-sm">+${friend.earned.toFixed(2)}</p>
             <p class="text-[7px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">USDT</p>
           </div>
         </div>
@@ -1072,12 +1248,12 @@ function renderFriends() {
 
     if (totalPages > 1) {
       html += `
-        <div class="flex items-center justify-between mt-4 px-1 animate-slide-up delay-400">
-          <button id="prev-friend-btn" class="px-3 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm" ${friendsPage <= 1 ? 'disabled' : ''}>
+        <div class="flex items-center justify-between mt-5 px-1 animate-slide-up delay-400 relative z-10">
+          <button id="prev-friend-btn" class="px-4 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${friendsPage <= 1 ? 'disabled' : ''}>
             <i class="fas fa-chevron-left mr-1"></i> Назад
           </button>
-          <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg">Стр. ${friendsPage} из ${totalPages}</span>
-          <button id="next-friend-btn" class="px-3 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm" ${friendsPage >= totalPages ? 'disabled' : ''}>
+          <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">Стр. ${friendsPage} из ${totalPages}</span>
+          <button id="next-friend-btn" class="px-4 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${friendsPage >= totalPages ? 'disabled' : ''}>
             Вперед <i class="fas fa-chevron-right ml-1"></i>
           </button>
         </div>
@@ -1091,7 +1267,7 @@ function renderFriends() {
 function attachFriendsEvents() {
   document.getElementById('copy-link-btn').addEventListener('click', () => {
     triggerHaptic('medium');
-    const link = `${BOT_APP_URL}?startapp=${currentUser.id}`;
+    const link = `${BOT_LINK}?start=${currentUser.id}`;
     navigator.clipboard.writeText(link).then(() => {
       showToast("Ссылка для приглашения скопирована!");
     }).catch(err => {
@@ -1177,98 +1353,109 @@ function renderProfile() {
     : currentUser.first_name.charAt(0);
 
   let html = `
-    <div class="px-4 pb-4 h-full overflow-y-auto hide-scrollbar">
-      <!-- Premium Profile Header -->
-      <div class="animate-slide-up relative bg-gradient-to-br from-slate-800 to-slate-850 rounded-3xl p-5 border border-slate-700/50 shadow-lg mb-4 mt-1 overflow-hidden group">
-        <div class="absolute -right-6 -top-6 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors duration-700"></div>
-        <div class="absolute -left-10 -bottom-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
+    <div class="px-4 pt-4 pb-6 h-full overflow-y-auto hide-scrollbar">
+      
+      <!-- ULTRA MEGA PREMIUM PROFILE HEADER -->
+      <div class="relative rounded-[2.5rem] p-6 mb-6 shadow-[0_20px_40px_rgba(0,0,0,0.5)] border border-white/5 animate-slide-up group overflow-hidden bg-[#0d1321]">
+        <!-- Animated Background Mesh/Gradient -->
+        <div class="absolute inset-0 bg-gradient-to-br from-teal-900/40 via-blue-900/20 to-[#0d1321] z-0"></div>
+        <div class="absolute top-0 right-0 w-64 h-64 bg-teal-500/10 rounded-full blur-[80px] group-hover:bg-teal-500/20 transition-all duration-1000 z-0"></div>
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-blue-500/10 rounded-full blur-[60px] group-hover:bg-blue-500/20 transition-all duration-1000 z-0"></div>
 
-        <div class="flex items-center space-x-4 mb-5 relative z-10">
-          <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-400 to-blue-500 flex items-center justify-center text-2xl font-black text-white border-2 border-slate-700 shadow-[0_0_20px_rgba(45,212,191,0.3)] overflow-hidden shrink-0 float-anim transform -rotate-3">
-            ${avatarHtml}
+        <div class="flex items-center space-x-5 mb-5 relative z-10">
+          <div class="relative w-24 h-24 rounded-full p-1 bg-gradient-to-tr from-teal-400 via-blue-500 to-purple-500 shadow-[0_0_30px_rgba(45,212,191,0.5)] shrink-0 float-anim group-hover:rotate-6 transition-transform duration-500">
+             <div class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-4xl font-black text-white border-4 border-slate-900 overflow-hidden relative">
+               <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent z-10"></div>
+               <span class="relative z-0">${avatarHtml}</span>
+             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <h2 class="text-xl font-black text-white truncate pr-2 tracking-tight">${currentUser.first_name}</h2>
-            <p class="text-teal-400 text-xs font-medium truncate mt-0.5 mb-2">@${currentUser.username || 'user'}</p>
-            <div class="inline-flex bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700/50 items-center space-x-2 shrink-0 tap-effect cursor-pointer shadow-inner hover:bg-slate-800 transition-colors" onclick="navigator.clipboard.writeText('${currentUser.id}'); showToast('ID скопирован!')">
-              <span class="text-[10px] text-slate-400 font-mono uppercase tracking-wider">ID: <span class="text-white font-bold">${currentUser.id}</span></span>
-              <i class="fas fa-copy text-[10px] text-teal-400"></i>
+            <h2 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-teal-100 truncate tracking-tight mb-2">${currentUser.first_name}</h2>
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="bg-white/10 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold border border-white/10 uppercase tracking-widest shadow-inner backdrop-blur-md">ID: ${currentUser.id}</span>
+                <button onclick="navigator.clipboard.writeText('${currentUser.id}'); showToast('ID скопирован!')" class="w-7 h-7 rounded-lg bg-teal-500/20 flex items-center justify-center text-teal-300 hover:text-white hover:bg-teal-500 transition-colors border border-teal-500/30 tap-effect shadow-inner"><i class="fas fa-copy text-[10px]"></i></button>
             </div>
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-4 border-t border-slate-700/50 relative z-10">
+        <div class="flex items-center justify-between pt-4 border-t border-white/10 relative z-10">
           <div class="flex flex-col">
-             <span class="text-[9px] text-slate-400 uppercase tracking-widest font-bold mb-1">Всего добыто</span>
-             <span class="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-400">${state.user.totalEarned.toFixed(2)} USDT</span>
+             <span class="text-[9px] text-teal-200/60 uppercase tracking-widest font-bold mb-1">Всего добыто</span>
+             <span class="text-lg font-black text-white drop-shadow-md">+${state.user.totalEarned.toFixed(2)} <span class="text-[10px] text-teal-300">USDT</span></span>
           </div>
           <div class="flex flex-col text-right">
-             <span class="text-[9px] text-slate-400 uppercase tracking-widest font-bold mb-1">В игре с</span>
-             <span class="text-xs text-white font-medium bg-slate-900/50 px-2 py-1 rounded-md border border-slate-800">${state.user.joinedDate}</span>
+             <span class="text-[9px] text-teal-200/60 uppercase tracking-widest font-bold mb-1">В игре с</span>
+             <span class="text-xs text-white font-medium bg-black/20 px-2.5 py-1 rounded-md border border-white/10 shadow-inner"><i class="fas fa-calendar-alt text-teal-500/50 mr-1.5"></i>${state.user.joinedDate}</span>
           </div>
         </div>
       </div>
 
-      <!-- Glassmorphism Balance Card -->
-      <div class="animate-slide-up delay-75 bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-600/30 mb-4 shadow-2xl relative overflow-hidden group">
-        <div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-teal-500/5 pointer-events-none"></div>
-        <div class="flex items-center justify-between relative z-10 mb-4">
-          <div>
-            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-wallet mr-1.5 text-slate-500"></i> Текущий баланс</span>
-            <div class="font-black text-white text-3xl leading-none mt-2 drop-shadow-md">${state.user.balance.toFixed(2)} <span class="text-sm text-teal-400 align-top">USDT</span></div>
+      <!-- GLASSMORPHISM PREMIUM WALLET CARD -->
+      <div class="animate-slide-up delay-75 glass-premium rounded-[2rem] p-6 mb-6 relative overflow-hidden group hover-glow transition-all duration-300">
+        <div class="absolute -right-10 -bottom-10 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl group-hover:bg-blue-400/30 transition-colors duration-500"></div>
+        <div class="absolute -left-10 -top-10 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl group-hover:bg-teal-400/20 transition-colors duration-500"></div>
+
+        <div class="flex items-center justify-between relative z-10 mb-6">
+          <div class="flex flex-col">
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-credit-card mr-2 text-blue-400/80 text-sm"></i> Мой баланс</span>
+            <div class="font-black text-white text-4xl md:text-5xl leading-none mt-2 drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] tracking-tighter">${state.user.balance.toFixed(2)}<span class="text-base text-blue-400 align-top font-bold ml-1">USDT</span></div>
+          </div>
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-teal-400 flex items-center justify-center text-xl text-white shadow-[0_0_20px_rgba(59,130,246,0.4)] border-2 border-slate-900/50 transform group-hover:rotate-12 transition-transform duration-300">
+            <i class="fas fa-wallet"></i>
           </div>
         </div>
         
-        <div class="flex space-x-3 relative z-10">
-          <button id="deposit-btn" class="flex-1 py-3.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white rounded-xl shadow-[0_5px_15px_rgba(59,130,246,0.3)] flex items-center justify-center transition-all tap-effect font-bold text-sm border border-blue-400/30">
-            <i class="fas fa-arrow-down mr-2 text-blue-200"></i> Пополнить
+        <div class="flex space-x-3 relative z-10 mb-4">
+          <button id="deposit-btn" class="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl shadow-[0_10px_25px_rgba(59,130,246,0.4)] flex items-center justify-center transition-all tap-effect font-black text-sm border border-blue-400/30 uppercase tracking-widest">
+            <i class="fas fa-arrow-down mr-2 text-blue-200"></i> Ввод
           </button>
-          <button id="withdraw-btn" class="flex-1 py-3.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 rounded-xl flex items-center justify-center transition-all tap-effect font-bold text-sm shadow-inner group-hover:border-slate-500">
-            <i class="fas fa-arrow-up mr-2 text-slate-400 group-hover:text-white transition-colors"></i> Вывести
-          </button>
-        </div>
-        <div class="flex space-x-3 mt-3 relative z-10">
-          <button onclick="window.openStakingModal()" class="flex-1 py-2.5 bg-slate-900/60 hover:bg-slate-800 text-blue-400 rounded-xl border border-blue-500/20 flex items-center justify-center transition-all tap-effect font-bold text-xs shadow-inner">
-            <i class="fas fa-vault mr-2"></i> Сейф (Стейкинг)
-          </button>
-          <button onclick="window.openFAQModal()" class="flex-1 py-2.5 bg-slate-900/60 hover:bg-slate-800 text-teal-400 rounded-xl border border-teal-500/20 flex items-center justify-center transition-all tap-effect font-bold text-xs shadow-inner">
-            <i class="fas fa-question-circle mr-2"></i> FAQ
+          <button id="withdraw-btn" class="flex-1 py-4 bg-slate-800/80 hover:bg-slate-700 text-white border border-slate-600/50 rounded-2xl flex items-center justify-center transition-all tap-effect font-black text-sm shadow-inner group-hover:border-slate-500 uppercase tracking-widest">
+            Вывод <i class="fas fa-arrow-up ml-2 text-slate-400 group-hover:text-white transition-colors"></i>
           </button>
         </div>
-        <p class="text-center text-[9px] text-slate-500 font-medium mt-3 relative z-10">Минимальная сумма вывода: <span class="text-slate-300">${minWith} USDT</span></p>
+        
+        <div class="grid grid-cols-2 gap-3 relative z-10">
+          <button onclick="window.openStakingModal()" class="py-3.5 bg-slate-900/60 hover:bg-slate-800 text-teal-400 rounded-xl border border-teal-500/20 flex items-center justify-center transition-all tap-effect font-bold text-xs shadow-inner uppercase tracking-wide group/btn">
+            <i class="fas fa-vault mr-2 group-hover/btn:scale-110 transition-transform text-lg text-teal-500/70"></i> Сейф
+          </button>
+          <button onclick="window.openFAQModal()" class="py-3.5 bg-slate-900/60 hover:bg-slate-800 text-blue-400 rounded-xl border border-blue-500/20 flex items-center justify-center transition-all tap-effect font-bold text-xs shadow-inner uppercase tracking-wide group/btn">
+            <i class="fas fa-question-circle mr-2 group-hover/btn:scale-110 transition-transform text-lg text-blue-500/70"></i> FAQ
+          </button>
+        </div>
       </div>
 
-      <!-- Premium Promo Section -->
-      <div class="animate-slide-up delay-150 bg-slate-850 rounded-2xl p-2 border border-slate-700/50 mb-6 shadow-sm flex items-center space-x-2 relative overflow-hidden focus-within:border-teal-500/50 transition-colors">
-        <div class="absolute inset-0 bg-teal-500/5 pointer-events-none"></div>
-        <div class="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-teal-400 shrink-0 shadow-inner relative z-10">
-          <i class="fas fa-gift text-sm"></i>
+      <!-- PREMIUM PROMO SECTION -->
+      <div class="animate-slide-up delay-150 glass-premium rounded-2xl p-2 border border-slate-700/50 mb-8 flex items-center space-x-2 relative overflow-hidden focus-within:border-teal-500/50 focus-within:shadow-[0_0_20px_rgba(45,212,191,0.15)] transition-all group">
+        <div class="absolute inset-0 bg-gradient-to-r from-teal-500/5 to-transparent pointer-events-none"></div>
+        <div class="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-teal-400 shrink-0 shadow-inner relative z-10 group-focus-within:bg-teal-500/10 group-focus-within:text-teal-300 transition-colors group-focus-within:-rotate-12 duration-300">
+          <i class="fas fa-gift text-sm drop-shadow-sm"></i>
         </div>
         <input type="text" id="promo-input" class="flex-1 bg-transparent border-none text-white text-xs focus:ring-0 outline-none placeholder-slate-500 uppercase font-mono py-2 relative z-10" placeholder="ВВЕДИТЕ ПРОМОКОД...">
-        <button id="activate-promo-btn" class="py-2.5 px-5 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-xl font-black text-xs tap-effect shadow-md shadow-teal-500/20 transition-colors shrink-0 relative z-10 tracking-wide">ОК</button>
+        <button id="activate-promo-btn" class="py-2.5 px-4 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-900 rounded-xl font-black text-[10px] tap-effect shadow-[0_5px_15px_rgba(20,184,166,0.3)] transition-colors shrink-0 relative z-10 tracking-widest uppercase border border-teal-400/50">Применить</button>
       </div>
 
-      <!-- History Section -->
-      <div class="animate-slide-up delay-225">
-        <div class="flex justify-between items-end mb-3 px-1">
-          <h3 class="font-bold text-white text-sm">История операций</h3>
-          <span class="text-[9px] bg-slate-800 text-slate-400 px-2 py-1 rounded-lg border border-slate-700">${history.length} записей</span>
+      <!-- HISTORY SECTION -->
+      <div class="animate-slide-up delay-200">
+        <div class="flex justify-between items-end mb-5 px-1">
+          <h3 class="font-bold text-white text-sm tracking-wide flex items-center"><i class="fas fa-history mr-2 text-slate-400"></i> История операций</h3>
+          <span class="text-[9px] bg-slate-800/80 text-slate-400 px-2.5 py-1.5 rounded-lg border border-slate-700 font-bold uppercase tracking-widest shadow-inner">${history.length} записей</span>
         </div>
-        <div class="space-y-2.5 pb-20">
+        <div class="space-y-3 pb-20">
   `;
 
   if (history.length === 0) {
     html += `
-      <div class="text-center py-8 bg-slate-850 rounded-3xl border border-slate-700/50 shadow-inner">
-        <div class="w-12 h-12 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-3 text-slate-600 shadow-inner border border-slate-700">
-          <i class="fas fa-receipt text-xl"></i>
+      <div class="text-center py-12 glass-premium rounded-3xl border border-slate-700/50 relative overflow-hidden group">
+        <div class="absolute inset-0 bg-gradient-to-b from-transparent to-slate-900/80 pointer-events-none"></div>
+        <div class="w-20 h-20 mx-auto bg-slate-900/80 rounded-full flex items-center justify-center mb-4 text-slate-600 shadow-inner border border-slate-800 relative z-10 group-hover:scale-110 transition-transform duration-500">
+          <i class="fas fa-receipt text-3xl"></i>
         </div>
-        <p class="text-slate-400 font-medium text-xs">История пуста</p>
-        <p class="text-slate-500 text-[10px] mt-1 px-4">Здесь будут отображаться ваши пополнения и выводы.</p>
+        <h3 class="text-white font-bold text-base mb-1 relative z-10">История пуста</h3>
+        <p class="text-slate-500 text-[11px] px-8 relative z-10">Здесь будут отображаться ваши пополнения и выводы.</p>
       </div>
     `;
   } else {
-    const renderItem = (t) => {
+    const renderItem = (t, index) => {
       let isDep = t.type === 'deposit';
       let statusColor = t.status === 'pending' ? 'text-yellow-400' : (t.status === 'completed' ? (isDep ? 'text-blue-400' : 'text-teal-400') : 'text-red-400');
       let statusBg = t.status === 'pending' ? 'bg-yellow-500/10 border-yellow-500/20' : (t.status === 'completed' ? (isDep ? 'bg-blue-500/10 border-blue-500/20' : 'bg-teal-500/10 border-teal-500/20') : 'bg-red-500/10 border-red-500/20');
@@ -1279,51 +1466,52 @@ function renderProfile() {
       let amountPrefix = isDep ? '+' : '-';
       let typeIcon = isDep ? 'fa-arrow-down' : 'fa-arrow-up';
       let typeIconColor = isDep ? 'text-blue-400' : 'text-slate-300';
+      let typeBg = isDep ? 'bg-blue-500/10 border-blue-500/20' : 'bg-slate-700/50 border-slate-600';
       let infoText = isDep ? 'Пополнение • ' + t.method : 'Вывод • ' + t.network;
-      let addressHtml = !isDep ? '<span class="text-[8px] text-slate-500 truncate w-24 text-right mt-1.5 font-mono bg-slate-900 px-1.5 py-0.5 rounded" title="' + t.address + '">' + t.address.substring(0,6) + '...' + t.address.slice(-4) + '</span>' : '';
+      let addressHtml = !isDep ? '<span class="text-[10px] text-slate-500 mt-2 block font-mono bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800 w-max" title="' + t.address + '">' + t.address.substring(0,8) + '...' + t.address.slice(-6) + '</span>' : '';
 
       return `
-        <div class="bg-slate-850 p-3 rounded-2xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-slate-600 transition-all tap-effect group relative overflow-hidden">
-          <div class="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
-          <div class="flex items-center space-x-3.5 relative z-10">
-            <div class="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center ${typeIconColor} shrink-0 text-sm border border-slate-800 shadow-inner group-hover:scale-105 transition-transform">
+        <div class="glass-premium p-4 rounded-2xl flex items-center justify-between hover:border-slate-500 transition-all tap-effect group relative overflow-hidden animate-slide-up" style="animation-delay: ${index * 75 + 150}ms">
+          <div class="absolute inset-0 bg-gradient-to-r from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+          <div class="flex items-start space-x-4 relative z-10 min-w-0">
+            <div class="w-12 h-12 rounded-xl ${typeBg} flex items-center justify-center ${typeIconColor} shrink-0 text-base border shadow-inner group-hover:scale-110 transition-transform duration-300">
                <i class="fas ${typeIcon}"></i>
             </div>
-            <div>
-              <p class="font-black text-xs ${amountClass}">${amountPrefix}${t.amount.toFixed(2)} <span class="text-[9px] font-bold opacity-80">USDT</span></p>
-              <p class="text-[9px] text-slate-500 font-medium mt-1 tracking-wide">${new Date(t.date).toLocaleString([], {day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit'})} • ${infoText}</p>
+            <div class="min-w-0 pr-2">
+              <p class="font-black text-[15px] ${amountClass} tracking-tight drop-shadow-sm mb-0.5">${amountPrefix}${t.amount.toFixed(2)} <span class="text-[9px] font-bold opacity-80 uppercase align-middle">USDT</span></p>
+              <p class="text-[10px] text-slate-400 font-medium tracking-wide truncate"><i class="fas fa-calendar-alt text-slate-500/50 mr-1.5"></i>${new Date(t.date).toLocaleString([], {day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit'})} <span class="mx-1.5 opacity-30">•</span> ${infoText}</p>
+              ${addressHtml}
             </div>
           </div>
-          <div class="flex flex-col items-end relative z-10">
-            <span class="${statusColor} ${statusBg} border text-[8px] font-bold flex items-center space-x-1.5 px-2 py-1 rounded-md shadow-sm">
-              <i class="fas ${statusIcon}"></i>
-              <span class="uppercase tracking-wider">${displayStatus}</span>
+          <div class="flex flex-col items-end relative z-10 shrink-0">
+            <span class="${statusColor} ${statusBg} border text-[9px] font-bold flex items-center px-2.5 py-1.5 rounded-xl shadow-inner group-hover:scale-105 transition-transform">
+              <i class="fas ${statusIcon} mr-1.5"></i>
+              <span class="uppercase tracking-widest">${displayStatus}</span>
             </span>
-            ${addressHtml}
           </div>
         </div>
       `;
     };
 
-    currentHistory.forEach(t => {
-      html += renderItem(t);
+    currentHistory.forEach((t, i) => {
+      html += renderItem(t, i);
     });
 
     if (totalPages > 1) {
       html += `
-        <div class="flex items-center justify-between mt-5 px-1 animate-slide-up delay-300">
-          <button id="prev-page-btn" class="px-4 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${profileHistoryPage <= 1 ? 'disabled' : ''}>
-            <i class="fas fa-chevron-left mr-1"></i> Назад
+        <div class="flex items-center justify-between mt-6 px-1 animate-slide-up" style="animation-delay: 400ms">
+          <button id="prev-page-btn" class="px-5 py-2.5 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${profileHistoryPage <= 1 ? 'disabled' : ''}>
+            <i class="fas fa-chevron-left mr-2"></i> Назад
           </button>
-          <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">Стр. ${profileHistoryPage} из ${totalPages}</span>
-          <button id="next-page-btn" class="px-4 py-2 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${profileHistoryPage >= totalPages ? 'disabled' : ''}>
-            Вперед <i class="fas fa-chevron-right ml-1"></i>
+          <span class="text-[11px] text-slate-400 font-bold bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 shadow-inner">Стр. ${profileHistoryPage} из ${totalPages}</span>
+          <button id="next-page-btn" class="px-5 py-2.5 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect shadow-sm border border-slate-700" ${profileHistoryPage >= totalPages ? 'disabled' : ''}>
+            Вперед <i class="fas fa-chevron-right ml-2"></i>
           </button>
         </div>
       `;
     }
   }
-  html += `</div></div></div>`;
+  html += '</div></div></div>';
   return html;
 }
 
@@ -1374,17 +1562,15 @@ function attachProfileEvents() {
       state.user.balance += promo.reward;
       state.user.totalEarned += promo.reward;
 
-      if (currentUser.id !== ADMIN_ID) {
-          User.findOne({ id: ADMIN_ID }).then(adminDoc => {
-              if (adminDoc && adminDoc.data && adminDoc.data.admin && adminDoc.data.admin.promoCodes) {
-                  const globalPromo = adminDoc.data.admin.promoCodes.find(p => p.code === code);
-                  if (globalPromo) {
-                      globalPromo.currentUses = (globalPromo.currentUses || 0) + 1;
-                      User.updateOne({ id: ADMIN_ID }, { $set: { data: adminDoc.data } });
-                  }
+      SettingsAPI.get().then(globalData => {
+          if (globalData && globalData.promoCodes) {
+              const globalPromo = globalData.promoCodes.find(p => p.code === code);
+              if (globalPromo) {
+                  globalPromo.currentUses = (globalPromo.currentUses || 0) + 1;
+                  SettingsAPI.update(globalData);
               }
-          });
-      }
+          }
+      });
 
       if (!state.deposits) state.deposits = [];
       state.deposits.push({
@@ -1558,10 +1744,7 @@ function openWithdrawModal() {
     <h3 class="text-xl font-bold text-white mb-4">Вывод USDT</h3>
     <div class="mb-4">
       <label class="block text-xs text-slate-400 mb-2">Сеть</label>
-      <div class="grid grid-cols-2 gap-2">
-        <button class="network-btn active bg-teal-500/20 border border-teal-500 text-teal-400 py-2 rounded-lg text-sm font-bold transition-colors" data-net="TRC-20">TRC-20</button>
-        <button class="network-btn bg-slate-800 border border-slate-700 text-slate-400 py-2 rounded-lg text-sm font-bold transition-colors" data-net="BEP-20">BEP-20</button>
-      </div>
+      <div class="grid grid-cols-2 gap-2">\n        <button class="network-btn active bg-teal-500/20 border border-teal-500 text-teal-400 py-2 rounded-lg text-sm font-bold transition-colors" data-net="TON">TON</button>\n        <button class="network-btn bg-slate-800 border border-slate-700 text-slate-400 py-2 rounded-lg text-sm font-bold transition-colors" data-net="BEP-20">BEP-20</button>\n      </div>
     </div>
     <div class="mb-4">
       <label class="block text-xs text-slate-400 mb-2">Адрес кошелька</label>
@@ -1587,7 +1770,7 @@ function openWithdrawModal() {
     modalContent.classList.add('animate-pop-in');
   }, 10);
 
-  let selectedNetwork = 'TRC-20';
+  let selectedNetwork = 'TON';
   const networkBtns = document.querySelectorAll('.network-btn');
   networkBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -1654,6 +1837,7 @@ async function syncAdminData() {
     let aggregatedPendingD = [];
     
     allDocs.forEach(doc => {
+        if (Number(doc.id) === 0) return;
         const dState = doc.data || {};
         const uData = dState.user || {};
         totalBalance += (uData.balance || 0);
@@ -1684,7 +1868,7 @@ async function syncAdminData() {
             }
         });
         
-        if (doc.id !== currentUser.id) {
+        if (String(doc.id) !== String(currentUser.id)) {
             usersList.push({
                 id: doc.id,
                 name: uData.firstName || 'User ' + doc.id,
@@ -1696,7 +1880,7 @@ async function syncAdminData() {
         }
     });
 
-    state.admin.stats.totalUsers = allDocs.length;
+    state.admin.stats.totalUsers = Math.max(0, allDocs.length - 1);
     state.admin.stats.totalBalance = totalBalance;
     state.admin.stats.dailyActive = dailyActive;
     state.admin.stats.totalPaid = totalPaid;
@@ -1740,7 +1924,10 @@ function setupAdminNavigation() {
   adminTabBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
       triggerHaptic('light');
-      const tab = e.currentTarget.dataset.atab;
+      const target = e.currentTarget;
+      if(target) target.classList.add('animating');
+      setTimeout(() => { if(target) target.classList.remove('animating'); }, 400);
+      const tab = target ? target.dataset.atab : e.target.dataset.atab;
       
       adminTabBtns.forEach(b => {
         b.classList.remove('bg-teal-500/10', 'text-teal-400', 'active');
@@ -1778,50 +1965,58 @@ function renderAdminTab(tab) {
 function renderAdminDashboard() {
   const totalSystemBalance = state.admin.stats.totalBalance;
   return `
-    <div class="mb-6 animate-slide-up relative z-10">
-      <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Обзор системы</h1>
-      <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Главная статистика проекта</p>
+    <div class="mb-8 animate-slide-up relative z-10 flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-blue-400 to-purple-500 tracking-tight mb-1">Дашборд</h1>
+        <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-shield-alt mr-2 text-teal-500/70"></i>Главная статистика проекта</p>
+      </div>
+      <div class="w-12 h-12 rounded-full glass-premium flex items-center justify-center shadow-inner relative overflow-hidden group border border-slate-700">
+         <div class="absolute inset-0 bg-gradient-to-tr from-teal-500/20 to-blue-500/20 group-hover:scale-150 transition-transform duration-500"></div>
+         <i class="fas fa-satellite-dish text-teal-400 animate-pulse relative z-10"></i>
+      </div>
     </div>
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 animate-slide-up delay-75 relative z-10">
-      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-blue-500/50 transition-all duration-300">
-        <div class="absolute -right-6 -top-6 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-colors"></div>
-        <div class="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 mb-3 border border-blue-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-users text-lg"></i></div>
-        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Всего юзеров</p>
-        <p class="text-2xl font-black text-white drop-shadow-md">${state.admin.stats.totalUsers.toLocaleString()}</p>
+
+    <!-- PREMIUM STATS GRID -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 relative z-10">
+      <div class="glass-premium p-5 rounded-3xl relative overflow-hidden group hover-glow animate-slide-up delay-50">
+        <div class="absolute -right-8 -top-8 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-colors duration-500"></div>
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 flex items-center justify-center text-blue-400 mb-4 border border-blue-500/20 shadow-inner group-hover:scale-110 group-hover:-rotate-6 transition-all duration-300"><i class="fas fa-users text-xl"></i></div>
+        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">Всего юзеров</p>
+        <p class="text-3xl font-black text-white drop-shadow-md tracking-tight">${state.admin.stats.totalUsers.toLocaleString()}</p>
       </div>
-      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-green-500/50 transition-all duration-300">
-        <div class="absolute -right-6 -top-6 w-24 h-24 bg-green-500/10 rounded-full blur-2xl group-hover:bg-green-500/20 transition-colors"></div>
-        <div class="w-10 h-10 rounded-xl bg-green-500/10 flex items-center justify-center text-green-400 mb-3 border border-green-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-bolt text-lg"></i></div>
-        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Активных (24ч)</p>
-        <p class="text-2xl font-black text-white drop-shadow-md">${state.admin.stats.dailyActive.toLocaleString()}</p>
+      <div class="glass-premium p-5 rounded-3xl relative overflow-hidden group hover:border-green-500/40 hover:box-shadow-[0_0_20px_rgba(34,197,94,0.2)] animate-slide-up delay-100">
+        <div class="absolute -right-8 -top-8 w-32 h-32 bg-green-500/10 rounded-full blur-3xl group-hover:bg-green-500/20 transition-colors duration-500"></div>
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500/20 to-green-600/10 flex items-center justify-center text-green-400 mb-4 border border-green-500/20 shadow-inner group-hover:scale-110 group-hover:rotate-6 transition-all duration-300"><i class="fas fa-bolt text-xl"></i></div>
+        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">Активных (24ч)</p>
+        <p class="text-3xl font-black text-white drop-shadow-md tracking-tight">${state.admin.stats.dailyActive.toLocaleString()}</p>
       </div>
-      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-teal-500/50 transition-all duration-300">
-        <div class="absolute -right-6 -top-6 w-24 h-24 bg-teal-500/10 rounded-full blur-2xl group-hover:bg-teal-500/20 transition-colors"></div>
-        <div class="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-400 mb-3 border border-teal-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-wallet text-lg"></i></div>
-        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Балансы юзеров</p>
-        <p class="text-2xl font-black text-white drop-shadow-md">${totalSystemBalance.toLocaleString()} <span class="text-xs text-teal-400 font-bold align-top">USDT</span></p>
+      <div class="glass-premium p-5 rounded-3xl relative overflow-hidden group hover:border-teal-500/40 hover:box-shadow-[0_0_20px_rgba(45,212,191,0.2)] animate-slide-up delay-150">
+        <div class="absolute -right-8 -top-8 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl group-hover:bg-teal-500/20 transition-colors duration-500"></div>
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-teal-500/20 to-teal-600/10 flex items-center justify-center text-teal-400 mb-4 border border-teal-500/20 shadow-inner group-hover:scale-110 group-hover:-rotate-6 transition-all duration-300"><i class="fas fa-wallet text-xl"></i></div>
+        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">Балансы юзеров</p>
+        <p class="text-3xl font-black text-white drop-shadow-md tracking-tight">${totalSystemBalance.toLocaleString(undefined, {maximumFractionDigits:2})} <span class="text-xs text-teal-400 font-bold align-top ml-0.5">USDT</span></p>
       </div>
-      <div class="bg-slate-800/40 backdrop-blur-xl p-5 rounded-3xl border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-pink-500/50 transition-all duration-300">
-        <div class="absolute -right-6 -top-6 w-24 h-24 bg-pink-500/10 rounded-full blur-2xl group-hover:bg-pink-500/20 transition-colors"></div>
-        <div class="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400 mb-3 border border-pink-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-hand-holding-usd text-lg"></i></div>
-        <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest mb-1">Выплачено</p>
-        <p class="text-2xl font-black text-white drop-shadow-md">${state.admin.stats.totalPaid.toLocaleString()} <span class="text-xs text-pink-400 font-bold align-top">USDT</span></p>
+      <div class="glass-premium p-5 rounded-3xl relative overflow-hidden group hover:border-pink-500/40 hover:box-shadow-[0_0_20px_rgba(236,72,153,0.2)] animate-slide-up delay-200">
+        <div class="absolute -right-8 -top-8 w-32 h-32 bg-pink-500/10 rounded-full blur-3xl group-hover:bg-pink-500/20 transition-colors duration-500"></div>
+        <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-pink-500/20 to-pink-600/10 flex items-center justify-center text-pink-400 mb-4 border border-pink-500/20 shadow-inner group-hover:scale-110 group-hover:rotate-6 transition-all duration-300"><i class="fas fa-hand-holding-usd text-xl"></i></div>
+        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">Выплачено</p>
+        <p class="text-3xl font-black text-white drop-shadow-md tracking-tight">${state.admin.stats.totalPaid.toLocaleString(undefined, {maximumFractionDigits:2})} <span class="text-xs text-pink-400 font-bold align-top ml-0.5">USDT</span></p>
       </div>
     </div>
     
-    <div class="flex items-center space-x-2 mb-4 animate-slide-up delay-150">
-       <div class="w-8 h-8 rounded-lg bg-teal-500/10 flex items-center justify-center text-teal-400 border border-teal-500/20"><i class="fas fa-history text-sm"></i></div>
-       <h2 class="text-sm font-bold text-white tracking-wide">Последние действия</h2>
+    <div class="flex items-center space-x-3 mb-4 animate-slide-up delay-225">
+       <div class="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center text-teal-400 border border-teal-500/20 shadow-inner"><i class="fas fa-history text-lg"></i></div>
+       <h2 class="text-base font-bold text-white tracking-wide">Последние действия</h2>
     </div>
-    <div class="bg-slate-800/40 backdrop-blur-xl rounded-2xl border border-slate-700/50 overflow-hidden shadow-lg animate-slide-up delay-225">
-      ${state.admin.recentActivity.length === 0 ? '<div class="p-5 text-center text-slate-500 text-xs">Нет активности</div>' : ''}
-      ${state.admin.recentActivity.slice(0, 5).map(act => `
-        <div class="p-4 border-b border-slate-700/50 flex justify-between items-center hover:bg-slate-700/40 transition-colors group">
-          <div class="flex items-center space-x-3.5">
-            <div class="w-2 h-2 rounded-full bg-teal-400 shadow-[0_0_8px_rgba(45,212,191,0.8)] group-hover:scale-150 transition-transform"></div>
-            <p class="text-xs text-slate-200 font-medium">${act.text}</p>
+    <div class="glass-premium rounded-3xl overflow-hidden animate-slide-up delay-300">
+      ${state.admin.recentActivity.length === 0 ? '<div class="p-8 text-center text-slate-500 text-sm font-medium"><i class="fas fa-box-open text-3xl mb-3 block opacity-50"></i>Нет активности</div>' : ''}
+      ${state.admin.recentActivity.slice(0, 5).map((act, i) => `
+        <div class="p-4 border-b border-slate-700/50 flex justify-between items-center hover:bg-slate-700/30 transition-colors group animate-slide-right" style="animation-delay: ${i*100+300}ms">
+          <div class="flex items-center space-x-4">
+            <div class="w-2.5 h-2.5 rounded-full bg-teal-400 shadow-[0_0_10px_rgba(45,212,191,0.8)] group-hover:scale-150 group-hover:bg-blue-400 transition-all duration-300"></div>
+            <p class="text-sm text-slate-200 font-medium">${act.text}</p>
           </div>
-          <span class="text-[10px] text-slate-500 font-mono bg-slate-900/50 px-2 py-1 rounded-md border border-slate-800">${act.time}</span>
+          <span class="text-[10px] text-slate-500 font-mono bg-slate-900/80 px-2.5 py-1.5 rounded-lg border border-slate-800 shadow-inner">${act.time}</span>
         </div>
       `).join('')}
     </div>
@@ -1912,10 +2107,10 @@ window.openUserDetailsModal = async (uId) => {
       </div>
 
       <div class="grid grid-cols-2 gap-3 px-1 pb-1">
-         <button onclick="window.openEditBalanceModal(${u.id})" class="py-3.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white rounded-xl font-bold text-xs tap-effect transition-colors shadow-sm group">
+         <button onclick="window.openEditBalanceModal('${u.id}')" class="py-3.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white rounded-xl font-bold text-xs tap-effect transition-colors shadow-sm group">
             <i class="fas fa-pencil-alt mr-1.5 text-slate-400 group-hover:text-white transition-colors"></i> Изменить баланс
          </button>
-         <button onclick="window.toggleUserBanFromModal(${u.id})" class="py-3.5 ${u.status === 'active' ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 shadow-red-500/10' : 'bg-green-500/10 text-green-400 border border-green-500/30 hover:bg-green-500/20 shadow-green-500/10'} rounded-xl font-bold text-xs tap-effect transition-colors shadow-sm">
+         <button onclick="window.toggleUserBanFromModal('${u.id}')" class="py-3.5 ${u.status === 'active' ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 shadow-red-500/10' : 'bg-green-500/10 text-green-400 border border-green-500/30 hover:bg-green-500/20 shadow-green-500/10'} rounded-xl font-bold text-xs tap-effect transition-colors shadow-sm">
             <i class="fas ${u.status === 'active' ? 'fa-ban' : 'fa-check'} mr-1.5"></i> ${u.status === 'active' ? 'Забанить' : 'Разбанить'}
          </button>
       </div>
@@ -1955,7 +2150,7 @@ window.openEditBalanceModal = async (uId) => {
       <input type="number" id="edit-balance-input" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-teal-500 outline-none mb-6" value="${uBalance}" step="0.1">
       <div class="flex space-x-3">
         <button onclick="window.openUserDetailsModal(${uId})" class="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold text-sm tap-effect">Назад</button>
-        <button onclick="window.saveUserBalance(${uId})" class="flex-1 py-3 bg-teal-500 text-slate-900 rounded-xl font-bold text-sm shadow-lg shadow-teal-500/20 tap-effect">Сохранить</button>
+        <button onclick="window.saveUserBalance('${uId}')" class="flex-1 py-3 bg-teal-500 text-slate-900 rounded-xl font-bold text-sm shadow-lg shadow-teal-500/20 tap-effect">Сохранить</button>
       </div>
     `;
 };
@@ -1997,18 +2192,18 @@ window.changeAdminUsersPage = (delta) => {
 function renderAdminUsers() {
   setTimeout(attachAdminUsersEvents, 0);
   return `
-    <div class="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4 animate-slide-up relative z-10">
+    <div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 animate-slide-up relative z-10">
       <div>
-        <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Пользователи</h1>
-        <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Управление базой</p>
+        <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-blue-400 to-purple-500 tracking-tight mb-1">Пользователи</h1>
+        <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-users mr-2 text-teal-500/70"></i>Управление базой</p>
       </div>
-      <div class="relative w-full md:w-72 group">
-        <div class="absolute inset-0 bg-teal-500/5 rounded-xl blur-md group-hover:bg-teal-500/10 transition-colors"></div>
+      <div class="relative w-full md:w-80 group">
+        <div class="absolute inset-0 bg-teal-500/10 rounded-2xl blur-md group-hover:bg-teal-500/20 transition-colors duration-500 z-0"></div>
         <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-teal-500/50 text-sm z-10 group-focus-within:text-teal-400 transition-colors"></i>
-        <input type="text" id="admin-search-input" placeholder="Поиск по ID, имени или @username..." class="relative z-10 w-full bg-slate-900/80 backdrop-blur-md border border-slate-700/50 rounded-xl py-3 pl-11 pr-4 text-xs text-white focus:border-teal-400 outline-none transition-all shadow-inner placeholder-slate-500">
+        <input type="text" id="admin-search-input" placeholder="Поиск по ID, имени, @username..." class="relative z-10 w-full glass-premium rounded-2xl py-3.5 pl-11 pr-4 text-sm text-white focus:border-teal-400 focus:shadow-[0_0_15px_rgba(45,212,191,0.2)] outline-none transition-all placeholder-slate-500">
       </div>
     </div>
-    <div id="admin-users-container" class="animate-slide-up delay-75 relative z-10">
+    <div id="admin-users-container" class="animate-slide-up delay-100 relative z-10">
     </div>
   `;
 }
@@ -2038,64 +2233,73 @@ function updateAdminUsersList() {
     ...state.admin.users
   ];
 
-  const filtered = allUsers.filter(u => 
-    String(u.id).includes(adminUsersSearch) || 
-    (u.name && u.name.toLowerCase().includes(adminUsersSearch)) || 
-    (u.username && u.username.toLowerCase().includes(adminUsersSearch))
-  );
+  const search = (adminUsersSearch || '').toLowerCase();
+  const filtered = allUsers.filter(u => {
+    const uId = String(u.id || '');
+    const uName = String(u.name || '').toLowerCase();
+    const uUser = String(u.username || '').toLowerCase();
+    return uId.includes(search) || uName.includes(search) || uUser.includes(search);
+  });
 
-  const itemsPerPage = 10;
+  const itemsPerPage = 999999;
   const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
   if (adminUsersPage > totalPages) adminUsersPage = totalPages;
   if (adminUsersPage < 1) adminUsersPage = 1;
 
   const currentUsers = filtered.slice((adminUsersPage - 1) * itemsPerPage, adminUsersPage * itemsPerPage);
 
-  let html = '<div class="space-y-2 pb-24">';
-      if (currentUsers.length === 0) {
-          html += '<div class="text-center py-6 bg-slate-800/40 backdrop-blur-md rounded-2xl border border-slate-700/50 text-slate-500 text-xs font-medium">Пользователи не найдены</div>';
-      }
+  let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 pb-24">';
+  if (currentUsers.length === 0) {
+      html += '<div class="col-span-full text-center py-12 glass-premium rounded-3xl text-slate-500 text-sm font-medium"><i class="fas fa-ghost text-3xl mb-3 block opacity-50"></i>Пользователи не найдены</div>';
+  }
 
-      currentUsers.forEach(u => {
-        const statusBadge = u.status === 'banned' ? '<span class="px-1.5 py-0.5 rounded text-[8px] bg-red-500/20 text-red-400 border border-red-500/30 uppercase font-bold tracking-wider ml-2 shadow-inner">Бан</span>' : '';
-        html += `
-          <div onclick="window.openUserDetailsModal(${u.id})" class="bg-slate-800/40 backdrop-blur-md p-3.5 rounded-2xl border border-slate-700/50 flex items-center justify-between shadow-sm hover:border-teal-500/40 hover:bg-slate-800/80 transition-all cursor-pointer tap-effect group ${u.id === currentUser.id ? 'border-teal-500/50 bg-teal-500/5' : ''}">
-            <div class="flex items-center space-x-3.5 min-w-0 w-full">
-              <div class="w-10 h-10 rounded-xl ${u.status === 'banned' ? 'bg-red-500/10 border border-red-500/30 text-red-400' : 'bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 text-white shadow-inner'} flex items-center justify-center font-bold text-sm relative shrink-0 group-hover:scale-105 transition-transform">
-                ${u.status === 'banned' ? '<i class="fas fa-ban"></i>' : u.name.charAt(0)}
-                ${u.id === currentUser.id ? '<div class="absolute -top-1 -right-1 w-3 h-3 bg-teal-400 rounded-full border-2 border-slate-900 shadow-[0_0_8px_rgba(45,212,191,0.8)]"></div>' : ''}
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="font-bold text-xs ${u.status === 'banned' ? 'text-slate-500 line-through' : 'text-white'} truncate flex items-center">${u.name} ${statusBadge}</p>
-                <p class="text-[10px] text-slate-400 mt-1 truncate font-mono">ID: ${u.id} ${u.username && u.username !== 'unknown' ? `<span class="text-[9px] text-slate-500 ml-1 bg-slate-900/80 px-1 rounded">@${u.username}</span>` : ''}</p>
-              </div>
-              <div class="text-right shrink-0 flex flex-col justify-center items-end mr-3">
-                <p class="font-black text-teal-400 text-sm drop-shadow-sm">${u.balance.toFixed(2)}</p>
-                <p class="text-[8px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">USDT</p>
-              </div>
-              <div class="w-6 h-6 rounded-full bg-slate-900 flex items-center justify-center text-slate-500 group-hover:text-teal-400 group-hover:bg-teal-500/10 transition-colors shrink-0">
-                <i class="fas fa-chevron-right text-[10px]"></i>
-              </div>
-            </div>
+  currentUsers.forEach((u, index) => {
+    const safeName = String(u.name || 'User ' + u.id);
+    const initial = safeName.charAt(0).toUpperCase();
+    const safeBalance = Number(u.balance || 0).toFixed(2);
+    const isBanned = u.status === 'banned';
+    
+    const statusBadge = isBanned ? '<span class="px-2 py-0.5 rounded-md text-[9px] bg-red-500/20 text-red-400 border border-red-500/30 uppercase font-bold tracking-wider ml-2 shadow-inner"><i class="fas fa-ban mr-1"></i>Бан</span>' : '';
+    
+    html += `
+      <div onclick="window.openUserDetailsModal('${u.id}')" class="glass-premium p-4 rounded-2xl flex items-center justify-between hover-glow transition-all cursor-pointer tap-effect group relative overflow-hidden animate-slide-up ${String(u.id) === String(currentUser.id) ? 'border-teal-500/50 bg-teal-500/10' : ''}" style="animation-delay: ${index * 50}ms">
+        <div class="absolute inset-0 bg-gradient-to-r from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+        <div class="flex items-center space-x-4 min-w-0 w-full relative z-10">
+          <div class="w-12 h-12 rounded-2xl ${isBanned ? 'bg-red-500/10 border border-red-500/30 text-red-400' : 'bg-gradient-to-br from-slate-700 to-slate-800 border border-slate-600 text-white shadow-inner'} flex items-center justify-center font-black text-lg relative shrink-0 group-hover:scale-110 transition-transform duration-300">
+            ${isBanned ? '<i class="fas fa-ban"></i>' : initial}
+            ${String(u.id) === String(currentUser.id) ? '<div class="absolute -top-1.5 -right-1.5 w-4 h-4 bg-teal-400 rounded-full border-[3px] border-[#0f172a] shadow-[0_0_10px_rgba(45,212,191,0.8)]"></div>' : ''}
           </div>
-        `;
-      });
-      html += '</div>';
+          <div class="min-w-0 flex-1">
+            <p class="font-black text-sm ${isBanned ? 'text-slate-500 line-through' : 'text-white'} truncate flex items-center tracking-wide">${safeName} ${statusBadge}</p>
+            <p class="text-[10px] text-slate-400 mt-1 truncate font-mono">ID: ${u.id} ${u.username && u.username !== 'unknown' ? `<span class="text-[9px] text-slate-500 ml-1.5 bg-slate-900/80 px-1.5 py-0.5 rounded-md border border-slate-700">@${u.username}</span>` : ''}</p>
+          </div>
+          <div class="text-right shrink-0 flex flex-col justify-center items-end mr-3">
+            <p class="font-black text-teal-400 text-base drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">${safeBalance}</p>
+            <p class="text-[8px] text-slate-500 uppercase font-bold tracking-widest mt-0.5">USDT</p>
+          </div>
+          <div class="w-8 h-8 rounded-full bg-slate-900/80 flex items-center justify-center text-slate-500 group-hover:text-teal-400 group-hover:bg-teal-500/20 transition-all shrink-0 border border-slate-700 group-hover:border-teal-500/50 shadow-inner">
+            <i class="fas fa-chevron-right text-xs"></i>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
 
-      if (totalPages > 1) {
-        html += `
-          <div class="flex items-center justify-between mt-4 px-1 pb-6 relative z-10">
-            <button onclick="window.changeAdminUsersPage(-1)" class="px-4 py-2 bg-slate-800 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect border border-slate-700 shadow-sm" ${adminUsersPage <= 1 ? 'disabled' : ''}>
-              <i class="fas fa-chevron-left mr-1.5"></i> Назад
-            </button>
-            <span class="text-[10px] text-slate-500 font-medium bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">Стр. ${adminUsersPage} из ${totalPages}</span>
-            <button onclick="window.changeAdminUsersPage(1)" class="px-4 py-2 bg-slate-800 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect border border-slate-700 shadow-sm" ${adminUsersPage >= totalPages ? 'disabled' : ''}>
-              Вперед <i class="fas fa-chevron-right ml-1.5"></i>
-            </button>
-          </div>
-        `;
-      }
-      container.innerHTML = html;
+  if (totalPages > 1) {
+    html += `
+      <div class="flex items-center justify-between mt-4 px-1 pb-6 relative z-10 animate-slide-up delay-200">
+        <button onclick="window.changeAdminUsersPage(-1)" class="px-5 py-2.5 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect border border-slate-700 shadow-sm" ${adminUsersPage <= 1 ? 'disabled' : ''}>
+          <i class="fas fa-chevron-left mr-2"></i> Назад
+        </button>
+        <span class="text-[11px] text-slate-400 font-bold bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 shadow-inner">Стр. ${adminUsersPage} из ${totalPages}</span>
+        <button onclick="window.changeAdminUsersPage(1)" class="px-5 py-2.5 bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed tap-effect border border-slate-700 shadow-sm" ${adminUsersPage >= totalPages ? 'disabled' : ''}>
+          Вперед <i class="fas fa-chevron-right ml-2"></i>
+        </button>
+      </div>
+    `;
+  }
+  container.innerHTML = html;
 }
 
 window.openAdminTaskModal = (taskId = null) => {
@@ -2191,45 +2395,46 @@ window.deleteAdminTask = (id) => {
 
 function renderAdminTasks() {
   let html = `
-    <div class="mb-5 flex justify-between items-center animate-slide-up">
+    <div class="mb-8 flex justify-between items-end animate-slide-up">
       <div>
-        <h1 class="text-xl font-bold text-white mb-1">Задания</h1>
-        <p class="text-slate-400 text-xs">Настройка способов заработка</p>
+        <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-blue-400 to-purple-500 tracking-tight mb-1">Задания</h1>
+        <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-tasks mr-2 text-teal-500/70"></i>Настройка способов заработка</p>
       </div>
-      <button onclick="window.openAdminTaskModal()" class="bg-teal-500 text-white px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-teal-400 transition-colors shadow-lg shadow-teal-500/20 tap-effect">
-        <i class="fas fa-plus mr-1"></i>Новое
+      <button onclick="window.openAdminTaskModal()" class="bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-900 px-4 py-2.5 rounded-xl font-black text-xs hover:from-teal-400 hover:to-emerald-400 transition-all shadow-[0_5px_15px_rgba(20,184,166,0.3)] tap-effect uppercase tracking-widest border border-teal-400/50">
+        <i class="fas fa-plus mr-1.5"></i>Новое
       </button>
     </div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 animate-slide-up delay-75">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-slide-up delay-100">
   `;
 
   if (state.tasks.length === 0) {
-     html += '<p class="text-slate-500 text-xs">Заданий пока нет.</p>';
+     html += '<div class="col-span-full text-center py-12 glass-premium rounded-3xl text-slate-500 text-sm font-medium"><i class="fas fa-clipboard-list text-3xl mb-3 block opacity-50"></i>Заданий пока нет</div>';
   }
 
-  state.tasks.forEach(t => {
+  state.tasks.forEach((t, i) => {
      html += `
-        <div class="bg-slate-850 p-4 rounded-xl border border-slate-800 flex flex-col justify-between hover:border-slate-700 transition-colors">
-          <div class="flex items-start justify-between mb-3">
-            <div class="flex items-center space-x-3">
-              <div class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-sm text-slate-300 shrink-0">
+        <div class="glass-premium p-5 rounded-2xl flex flex-col justify-between hover-glow transition-all group relative overflow-hidden animate-slide-up" style="animation-delay: ${i*50+150}ms">
+          <div class="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+          <div class="flex items-start justify-between mb-4 relative z-10">
+            <div class="flex items-center space-x-4">
+              <div class="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center text-xl text-slate-300 shrink-0 border border-slate-700 shadow-inner group-hover:scale-110 group-hover:text-teal-400 transition-all duration-300">
                 <i class="fab ${t.icon}"></i>
               </div>
               <div class="min-w-0 pr-2">
-                <h3 class="font-bold text-xs text-white truncate w-full" title="${t.title}">${t.title}</h3>
-                <span class="text-[10px] text-teal-400 font-medium">Награда: ${t.reward} USDT</span>
+                <h3 class="font-black text-sm text-white truncate w-full tracking-wide" title="${t.title}">${t.title}</h3>
+                <span class="text-[11px] text-teal-400 font-bold bg-teal-500/10 px-2 py-0.5 rounded-md border border-teal-500/20 inline-block mt-1">Награда: ${t.reward} USDT</span>
               </div>
             </div>
-            <div class="flex space-x-1.5 shrink-0">
-              <button onclick="window.openAdminTaskModal('${t.id}')" class="w-7 h-7 rounded bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors tap-effect text-xs"><i class="fas fa-edit"></i></button>
-              <button onclick="window.deleteAdminTask('${t.id}')" class="w-7 h-7 rounded bg-slate-800 text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors tap-effect text-xs"><i class="fas fa-trash"></i></button>
+            <div class="flex space-x-2 shrink-0">
+              <button onclick="window.openAdminTaskModal('${t.id}')" class="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-blue-500/50 border border-slate-700 hover:border-blue-500/50 transition-colors tap-effect text-sm shadow-inner"><i class="fas fa-edit"></i></button>
+              <button onclick="window.deleteAdminTask('${t.id}')" class="w-9 h-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-red-500/50 border border-slate-700 hover:border-red-500/50 transition-colors tap-effect text-sm shadow-inner"><i class="fas fa-trash"></i></button>
             </div>
           </div>
-          <div class="bg-slate-900 rounded-lg p-2 flex items-center justify-between border border-slate-800/50">
-            <span class="text-[10px] text-slate-500 truncate mr-2 font-mono">${t.url}</span>
-            <div class="flex items-center space-x-2">
-              <span class="text-[9px] text-slate-400"><i class="fas fa-users mr-1"></i>${t.currentUses || 0}/${t.maxUses || '∞'}</span>
-              <span class="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded uppercase">${t.type}</span>
+          <div class="bg-slate-900/80 rounded-xl p-3 flex items-center justify-between border border-slate-800 shadow-inner relative z-10">
+            <span class="text-[10px] text-slate-500 truncate mr-3 font-mono bg-black/40 px-2 py-1 rounded">${t.url}</span>
+            <div class="flex items-center space-x-2 shrink-0">
+              <span class="text-[10px] text-slate-400 font-bold bg-slate-800 px-2.5 py-1 rounded-md border border-slate-700"><i class="fas fa-users mr-1.5 text-teal-500/70"></i>${t.currentUses || 0}/${t.maxUses || '∞'}</span>
+              <span class="text-[9px] bg-slate-700 text-slate-300 px-2.5 py-1 rounded-md uppercase font-bold tracking-widest border border-slate-600">${t.type}</span>
             </div>
           </div>
         </div>
@@ -2324,62 +2529,88 @@ function renderAdminFinances() {
   const pendingDeposits = state.admin.pendingDeposits || [];
   
   return `
-    <div class="mb-5 animate-slide-up">
-      <h1 class="text-xl font-bold text-white mb-1">Финансы</h1>
-      <p class="text-slate-400 text-xs">Управление пополнениями и выплатами</p>
+    <div class="mb-8 animate-slide-up">
+      <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-blue-400 to-purple-500 tracking-tight mb-1">Финансы</h1>
+      <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-money-bill-wave mr-2 text-teal-500/70"></i>Управление пополнениями и выплатами</p>
     </div>
     
     <!-- Pending Deposits -->
-    <h2 class="text-sm font-bold text-white mb-3 flex items-center space-x-2 animate-slide-up delay-75">
-      <i class="fas fa-arrow-down text-blue-500"></i>
-      <span>Ожидают пополнения (${pendingDeposits.length})</span>
+    <h2 class="text-sm font-bold text-white mb-4 flex items-center space-x-2 animate-slide-up delay-75">
+      <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-500/20"><i class="fas fa-arrow-down"></i></div>
+      <span>Ожидают пополнения <span class="bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full ml-1">${pendingDeposits.length}</span></span>
     </h2>
-    <div class="space-y-3 mb-8 animate-slide-up delay-150">
-      ${pendingDeposits.length === 0 ? `<div class="p-4 text-center bg-slate-850 rounded-xl border border-slate-800 text-slate-500"><p class="text-xs">Нет заявок</p></div>` : ''}
-      ${pendingDeposits.map(d => `
-        <div class="bg-slate-850 p-4 rounded-xl border border-blue-500/20 flex flex-col justify-between gap-3">
-          <div class="flex items-center space-x-3 mb-1">
-            <span class="font-bold text-white text-sm">${d.user}</span>
-            <span class="bg-blue-500/10 text-blue-400 text-[9px] px-1.5 py-0.5 rounded border border-blue-500/20">Проверка</span>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10 animate-slide-up delay-100">
+      ${pendingDeposits.length === 0 ? `<div class="col-span-full p-8 text-center glass-premium rounded-2xl text-slate-500 text-sm font-medium"><i class="fas fa-check-circle text-3xl mb-3 block opacity-50"></i>Нет заявок на пополнение</div>` : ''}
+      ${pendingDeposits.map((d, i) => `
+        <div class="glass-premium p-5 rounded-2xl flex flex-col justify-between gap-4 relative overflow-hidden group hover:border-blue-500/40 transition-all animate-slide-up" style="animation-delay: ${i*50+150}ms">
+          <div class="absolute -right-10 -top-10 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          <div>
+            <div class="flex items-center space-x-3 mb-3 relative z-10">
+              <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center font-bold text-white border border-slate-700 shadow-inner">
+                 ${d.user.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                 <span class="font-black text-white text-sm block tracking-wide">${d.user}</span>
+                 <span class="bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-blue-500/20 mt-1 inline-block">Проверка</span>
+              </div>
+            </div>
+            <div class="flex flex-col space-y-2 text-xs mb-2 relative z-10 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+              <div class="flex justify-between items-center"><span class="text-slate-400 font-bold uppercase text-[9px] tracking-widest">Сумма</span> <span class="text-blue-400 font-black text-sm">+${d.amount} USDT</span></div>
+              <div class="flex justify-between items-center"><span class="text-slate-400 font-bold uppercase text-[9px] tracking-widest">Метод</span> <span class="text-white font-bold uppercase">${d.method}</span></div>
+              <div class="flex justify-between items-center mt-1"><span class="text-slate-400 font-bold uppercase text-[9px] tracking-widest">Memo</span> <span class="text-white font-mono bg-black/40 px-1.5 py-0.5 rounded select-all">${d.memo || 'Нет'}</span></div>
+            </div>
           </div>
-          <div class="flex flex-col space-y-1 text-xs mb-1">
-            <div class="text-slate-400">Сумма: <span class="text-blue-400 font-bold ml-1">+${d.amount} USDT</span></div>
-            <div class="text-slate-400">Метод: <span class="text-white ml-1 uppercase">${d.method}</span></div>
-            <div class="text-slate-400">Memo: <span class="text-white ml-1 font-mono">${d.memo || 'Нет'}</span></div>
-          </div>
-          <div class="flex space-x-2 mt-1 w-full">
-            <button onclick="window.processDeposit('${d.id}', 'approve')" class="flex-1 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-lg text-xs font-bold transition-colors tap-effect">Одобрить</button>
-            <button onclick="window.processDeposit('${d.id}', 'reject')" class="flex-1 py-1.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 rounded-lg text-xs font-bold transition-colors tap-effect">Отклонить</button>
+          <div class="flex space-x-3 w-full relative z-10">
+            <button onclick="window.processDeposit('${d.id}', 'approve')" class="flex-1 py-2.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-black transition-colors tap-effect shadow-[0_5px_15px_rgba(59,130,246,0.3)] uppercase tracking-wider">Одобрить</button>
+            <button onclick="window.processDeposit('${d.id}', 'reject')" class="flex-1 py-2.5 bg-slate-800 hover:bg-red-500 hover:text-white text-slate-400 border border-slate-700 rounded-xl text-xs font-black transition-colors tap-effect shadow-inner uppercase tracking-wider">Отклонить</button>
           </div>
         </div>
       `).join('')}
     </div>
 
     <!-- Pending Withdrawals -->
-    <h2 class="text-sm font-bold text-white mb-3 flex items-center space-x-2 animate-slide-up delay-225">
-      <i class="fas fa-arrow-up text-yellow-500"></i>
-      <span>Ожидают выплаты (${state.admin.pendingWithdrawals.length})</span>
+    <h2 class="text-sm font-bold text-white mb-4 flex items-center space-x-2 animate-slide-up delay-200">
+      <div class="w-8 h-8 rounded-lg bg-yellow-500/10 flex items-center justify-center text-yellow-500 border border-yellow-500/20"><i class="fas fa-arrow-up"></i></div>
+      <span>Ожидают выплаты <span class="bg-yellow-500 text-slate-900 text-[10px] px-2 py-0.5 rounded-full ml-1 font-bold">${state.admin.pendingWithdrawals.length}</span></span>
     </h2>
-    <div class="space-y-3 animate-slide-up delay-300">
-      ${state.admin.pendingWithdrawals.length === 0 ? `<div class="p-4 text-center bg-slate-850 rounded-xl border border-slate-800 text-slate-500"><p class="text-xs">Нет заявок</p></div>` : ''}
-      ${state.admin.pendingWithdrawals.map(w => `
-        <div class="bg-slate-850 p-4 rounded-xl border border-yellow-500/20 flex flex-col md:flex-row justify-between md:items-center gap-3">
-          <div>
-            <div class="flex items-center space-x-3 mb-1.5">
-              <span class="font-bold text-white text-sm">${w.user}</span>
-              <span class="bg-yellow-500/10 text-yellow-500 text-[9px] px-1.5 py-0.5 rounded border border-yellow-500/20">Ожидает</span>
+    <div class="space-y-4 animate-slide-up delay-300 pb-20">
+      ${state.admin.pendingWithdrawals.length === 0 ? `<div class="p-8 text-center glass-premium rounded-2xl text-slate-500 text-sm font-medium"><i class="fas fa-check-double text-3xl mb-3 block opacity-50"></i>Нет заявок на вывод</div>` : ''}
+      ${state.admin.pendingWithdrawals.map((w, i) => `
+        <div class="glass-premium p-5 rounded-2xl flex flex-col md:flex-row justify-between md:items-center gap-4 relative overflow-hidden group hover:border-yellow-500/40 transition-all animate-slide-up" style="animation-delay: ${i*50+300}ms">
+          <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="relative z-10 w-full md:w-auto flex-1">
+            <div class="flex items-center space-x-4 mb-3">
+              <div class="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center font-bold text-white border border-slate-700 shadow-inner shrink-0">
+                 ${w.user.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div class="flex items-center space-x-2">
+                   <span class="font-black text-white text-base tracking-wide">${w.user}</span>
+                   <span class="bg-yellow-500/10 text-yellow-500 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border border-yellow-500/20">Ожидает</span>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1 font-mono">ID: ${w.userId}</div>
+              </div>
             </div>
-            <div class="flex items-center space-x-4 text-[11px]">
-              <div class="text-slate-400">Сумма: <span class="text-teal-400 font-bold ml-1">-${w.amount} USDT</span></div>
-              <div class="text-slate-400">Сеть: <span class="text-white ml-1">${w.network}</span></div>
-            </div>
-            <div class="mt-2 text-[9px] text-slate-500 font-mono bg-slate-900 p-1.5 rounded border border-slate-800 break-all select-all">
-              ${w.address}
+            <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+               <div class="flex items-center space-x-6">
+                  <div>
+                     <span class="text-slate-400 font-bold uppercase text-[9px] tracking-widest block mb-1">Сумма</span>
+                     <span class="text-teal-400 font-black text-lg">-${w.amount} USDT</span>
+                  </div>
+                  <div>
+                     <span class="text-slate-400 font-bold uppercase text-[9px] tracking-widest block mb-1">Сеть</span>
+                     <span class="text-white font-bold bg-slate-800 px-2.5 py-1 rounded text-xs border border-slate-700 uppercase">${w.network}</span>
+                  </div>
+               </div>
+               <div class="mt-2 md:mt-0 max-w-sm">
+                  <span class="text-slate-400 font-bold uppercase text-[9px] tracking-widest block mb-1">Адрес</span>
+                  <div class="text-xs text-white font-mono bg-black/40 p-2 rounded-lg border border-slate-800 break-all select-all shadow-inner">${w.address}</div>
+               </div>
             </div>
           </div>
-          <div class="flex md:flex-col space-x-2 md:space-x-0 md:space-y-2 w-full md:w-28 shrink-0">
-            <button onclick="window.processWithdrawal('${w.id}', 'approve')" class="flex-1 md:w-full py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 rounded-lg text-xs font-bold transition-colors tap-effect">Оплатить</button>
-            <button onclick="window.processWithdrawal('${w.id}', 'reject')" class="flex-1 md:w-full py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-xs font-bold transition-colors tap-effect">Отклонить</button>
+          <div class="flex md:flex-col space-x-3 md:space-x-0 md:space-y-3 w-full md:w-36 shrink-0 relative z-10">
+            <button onclick="window.processWithdrawal('${w.id}', 'approve')" class="flex-1 md:w-full py-3 bg-teal-500 hover:bg-teal-400 text-slate-900 rounded-xl text-xs font-black transition-colors tap-effect shadow-[0_5px_15px_rgba(20,184,166,0.3)] uppercase tracking-wider"><i class="fas fa-check mr-1.5"></i>Оплатить</button>
+            <button onclick="window.processWithdrawal('${w.id}', 'reject')" class="flex-1 md:w-full py-3 bg-slate-800 hover:bg-red-500 hover:text-white text-slate-400 border border-slate-700 rounded-xl text-xs font-black transition-colors tap-effect shadow-inner uppercase tracking-wider"><i class="fas fa-times mr-1.5"></i>Отклонить</button>
           </div>
         </div>
       `).join('')}
@@ -2406,7 +2637,7 @@ window.sendBroadcast = async () => {
   try {
     const res = await fetch(`${API_URL}/broadcast`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store, no-cache, must-revalidate' },
       body: JSON.stringify({ message, imageUrl, buttonText, buttonUrl, adminId: currentUser.id })
     });
     
@@ -2433,42 +2664,59 @@ window.sendBroadcast = async () => {
 
 function renderAdminBroadcast() {
   return `
-    <div class="mb-6 animate-slide-up relative z-10">
-      <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Рассылка</h1>
-      <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Отправка сообщений всем пользователям бота</p>
+    <div class="mb-4 animate-slide-up relative z-10">
+      <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-blue-400 to-purple-500 tracking-tight mb-1">Рассылка</h1>
+      <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-bullhorn mr-2 text-teal-500/70"></i>Отправка сообщений всем пользователям</p>
     </div>
 
-    <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-teal-500/50 transition-all duration-300 animate-slide-up delay-75 pb-20 z-10">
-       <div class="absolute -right-10 -top-10 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors"></div>
-       <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-bullhorn text-teal-400 mr-2"></i>Создать сообщение</h2>
+    <div class="glass-premium rounded-[2rem] p-4 lg:p-5 relative overflow-hidden group hover:border-teal-500/40 transition-all duration-500 animate-slide-up delay-75 z-10">
+       <div class="absolute -right-10 -top-10 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors duration-700"></div>
+       <div class="absolute -left-10 -bottom-10 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/20 transition-colors duration-700"></div>
        
-       <div class="space-y-4 relative z-10">
-          <div class="relative">
-            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Текст сообщения (поддерживает HTML)*</label>
-            <textarea id="broadcast-text" rows="5" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 px-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner" placeholder="<b>Жирный текст</b>\nОбычный текст..."></textarea>
+       <div class="flex items-center space-x-3 mb-4 relative z-10">
+         <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-teal-500/20 to-blue-500/20 flex items-center justify-center text-xl text-teal-400 border border-teal-500/30 shadow-[0_0_20px_rgba(45,212,191,0.2)] group-hover:scale-110 transition-transform duration-500">
+           <i class="fas fa-paper-plane"></i>
+         </div>
+         <div>
+           <h2 class="text-lg font-black text-white tracking-wide">Создать сообщение</h2>
+           <p class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">HTML поддерживается</p>
+         </div>
+       </div>
+       
+       <div class="space-y-3 relative z-10">
+          <div class="relative group/input">
+            <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center"><i class="fas fa-comment-alt mr-2 text-slate-500"></i>Текст сообщения*</label>
+            <textarea id="broadcast-text" rows="3" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-2.5 px-3 text-sm font-medium text-white focus:border-teal-400 focus:shadow-[0_0_15px_rgba(45,212,191,0.2)] outline-none transition-all resize-none" placeholder="<b>Жирный текст</b>\nОбычный текст..."></textarea>
           </div>
           
-          <div class="relative">
-            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">URL картинки (необязательно)</label>
-            <div class="relative flex items-center">
-              <i class="fas fa-image absolute left-3.5 text-slate-500"></i>
-              <input type="text" id="broadcast-image" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 outline-none transition-all shadow-inner" placeholder="https://...">
+          <div class="relative group/input">
+            <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center"><i class="fas fa-image mr-2 text-slate-500"></i>URL картинки (необязательно)</label>
+            <div class="relative flex items-center group-focus-within/input:text-teal-400">
+              <i class="fas fa-link absolute left-3 text-slate-500 transition-colors"></i>
+              <input type="text" id="broadcast-image" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-2.5 pl-9 pr-3 text-sm font-medium text-white focus:border-teal-400 focus:shadow-[0_0_15px_rgba(45,212,191,0.2)] outline-none transition-all font-mono" placeholder="https://...">
             </div>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-             <div class="relative">
-                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Текст кнопки (необяз.)</label>
-                <input type="text" id="broadcast-btn-text" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 px-3 text-sm text-white focus:border-teal-500 outline-none transition-all shadow-inner" placeholder="Играть">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+             <div class="relative group/input">
+                <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center"><i class="fas fa-font mr-2 text-slate-500"></i>Текст кнопки (необяз.)</label>
+                <div class="relative flex items-center group-focus-within/input:text-blue-400">
+                  <i class="fas fa-keyboard absolute left-3 text-slate-500 transition-colors"></i>
+                  <input type="text" id="broadcast-btn-text" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-2.5 pl-9 pr-3 text-sm font-medium text-white focus:border-blue-400 focus:shadow-[0_0_15px_rgba(59,130,246,0.2)] outline-none transition-all" placeholder="Играть">
+                </div>
              </div>
-             <div class="relative">
-                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">URL кнопки (необяз.)</label>
-                <input type="text" id="broadcast-btn-url" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 px-3 text-sm text-white focus:border-teal-500 outline-none transition-all shadow-inner" placeholder="https://t.me/...">
+             <div class="relative group/input">
+                <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center"><i class="fas fa-external-link-alt mr-2 text-slate-500"></i>URL кнопки (необяз.)</label>
+                <div class="relative flex items-center group-focus-within/input:text-blue-400">
+                  <i class="fas fa-globe absolute left-3 text-slate-500 transition-colors"></i>
+                  <input type="text" id="broadcast-btn-url" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-2.5 pl-9 pr-3 text-sm font-medium text-white focus:border-blue-400 focus:shadow-[0_0_15px_rgba(59,130,246,0.2)] outline-none transition-all font-mono" placeholder="https://t.me/...">
+                </div>
              </div>
           </div>
           
-          <button id="send-broadcast-btn" onclick="window.sendBroadcast()" class="w-full mt-2 py-4 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white font-black text-sm rounded-2xl shadow-[0_10px_25px_rgba(20,184,166,0.3)] tap-effect border border-teal-400/50 uppercase tracking-wide flex items-center justify-center">
-             <i class="fas fa-paper-plane mr-2"></i> Отправить рассылку
+          <button id="send-broadcast-btn" onclick="window.sendBroadcast()" class="w-full mt-2 py-3 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-slate-900 font-black text-sm rounded-xl shadow-[0_5px_20px_rgba(20,184,166,0.4)] tap-effect border border-teal-400/50 uppercase tracking-widest flex items-center justify-center relative overflow-hidden group/btn min-h-[48px]">
+             <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover/btn:animate-[shimmer_1.5s_infinite]"></div>
+             <i class="fas fa-paper-plane mr-2 text-lg relative z-10 group-hover/btn:-translate-y-1 group-hover/btn:translate-x-1 transition-transform"></i> <span class="relative z-10 drop-shadow-sm">Отправить</span>
           </button>
        </div>
     </div>
@@ -2502,6 +2750,7 @@ window.saveAdminSettings = () => {
   state.admin.recentActivity.unshift({ time: 'Только что', text: 'Обновлены настройки системы' });
 
   saveState();
+  console.log('Saving admin settings to state & backend...', state.settings);
   showToast('Настройки успешно сохранены');
   checkAccess();
 };
@@ -2516,140 +2765,137 @@ function renderAdminSettings() {
   const tonWallet = settings.tonWallet || '';
 
   return `
-    <div class="mb-6 animate-slide-up relative z-10">
-      <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight mb-1">Настройки</h1>
-      <p class="text-slate-400 text-[11px] font-medium uppercase tracking-widest">Управление экономикой и системой</p>
+    <div class="mb-8 animate-slide-up relative z-10">
+      <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-teal-400 via-blue-400 to-purple-500 tracking-tight mb-1">Настройки</h1>
+      <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest flex items-center"><i class="fas fa-cogs mr-2 text-teal-500/70"></i>Управление экономикой и системой</p>
     </div>
 
-    <div class="space-y-5 animate-slide-up delay-75 pb-20 relative z-10">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 animate-slide-up delay-75 pb-24 relative z-10">
       
       <!-- Mining & Upgrades -->
-      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-teal-500/50 transition-all duration-300">
-         <div class="absolute -right-10 -top-10 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors"></div>
-         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-hammer text-teal-400 mr-2"></i>Майнинг и Улучшения</h2>
+      <div class="glass-premium rounded-[2rem] p-6 relative overflow-hidden group hover:border-teal-500/40 transition-all duration-500">
+         <div class="absolute -right-10 -top-10 w-40 h-40 bg-teal-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-teal-500/20 transition-colors"></div>
+         <div class="flex items-center space-x-4 mb-6 relative z-10">
+           <div class="w-12 h-12 rounded-2xl bg-teal-500/10 flex items-center justify-center text-xl text-teal-400 border border-teal-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-hammer"></i></div>
+           <h2 class="text-lg font-black text-white">Майнинг</h2>
+         </div>
          
-         <div class="space-y-4 relative z-10">
+         <div class="space-y-5 relative z-10">
             <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Базовая добыча (USDT/ч)</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-bolt absolute left-3.5 text-slate-500"></i>
-                <input type="number" id="set-mining-rate" value="${mRate}" step="0.001" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Базовая добыча (USDT/ч)</label>
+              <div class="relative flex items-center group-focus-within:text-teal-400">
+                <i class="fas fa-bolt absolute left-4 text-slate-500 transition-colors"></i>
+                <input type="number" id="set-mining-rate" value="${mRate}" step="0.001" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm font-bold text-white focus:border-teal-400 focus:shadow-[0_0_15px_rgba(45,212,191,0.2)] outline-none transition-all">
               </div>
             </div>
             <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Хранилище: Макс. время майнинга (Часов)</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-hourglass-half absolute left-3.5 text-slate-500"></i>
-                <input type="number" id="set-max-mining-hours" value="${maxHrs}" step="1" min="1" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Макс. время майнинга (Часов)</label>
+              <div class="relative flex items-center group-focus-within:text-teal-400">
+                <i class="fas fa-hourglass-half absolute left-4 text-slate-500 transition-colors"></i>
+                <input type="number" id="set-max-mining-hours" value="${maxHrs}" step="1" min="1" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm font-bold text-white focus:border-teal-400 focus:shadow-[0_0_15px_rgba(45,212,191,0.2)] outline-none transition-all">
               </div>
             </div>
             <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Базовая цена апгрейда (USDT)</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-arrow-up absolute left-3.5 text-slate-500"></i>
-                <input type="number" id="set-upgrade-cost" value="${uCost}" step="0.5" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500/50 outline-none transition-all shadow-inner">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Базовая цена апгрейда (USDT)</label>
+              <div class="relative flex items-center group-focus-within:text-teal-400">
+                <i class="fas fa-arrow-up absolute left-4 text-slate-500 transition-colors"></i>
+                <input type="number" id="set-upgrade-cost" value="${uCost}" step="0.5" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm font-bold text-white focus:border-teal-400 focus:shadow-[0_0_15px_rgba(45,212,191,0.2)] outline-none transition-all">
               </div>
             </div>
          </div>
       </div>
 
-      <!-- Referral System -->
-      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-blue-500/50 transition-all duration-300">
-         <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/20 transition-colors"></div>
-         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-users text-blue-400 mr-2"></i>Реферальная система</h2>
-         
-         <div class="grid grid-cols-2 gap-3 relative z-10">
-            <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Фикс. бонус</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-gift absolute left-3.5 text-slate-500"></i>
-                <input type="number" id="set-ref-fixed" value="${refFix}" step="0.01" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-9 pr-2 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-              </div>
-            </div>
-            <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Процент (%)</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-percent absolute left-3.5 text-slate-500"></i>
-                <input type="number" id="set-ref-bonus" value="${refPercent}" step="1" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-9 pr-2 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 outline-none transition-all shadow-inner">
-              </div>
-            </div>
-         </div>
-      </div>
-
-      <!-- Finances & Wallets -->
-      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-green-500/50 transition-all duration-300">
-         <div class="absolute -right-10 -top-10 w-32 h-32 bg-green-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-green-500/20 transition-colors"></div>
-         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-wallet text-green-400 mr-2"></i>Финансы и Выплаты</h2>
-         
-         <div class="space-y-4 relative z-10">
-            <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Мин. сумма вывода (USDT)</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-money-bill-wave absolute left-3.5 text-slate-500"></i>
-                <input type="number" id="set-min-with" value="${settings.minWithdrawal}" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white focus:border-green-500 focus:ring-1 focus:ring-green-500/50 outline-none transition-all shadow-inner">
-              </div>
-            </div>
-            <div class="relative">
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Кошелек TON (Tonkeeper)</label>
-              <div class="relative flex items-center">
-                <i class="fas fa-link absolute left-3.5 text-slate-500"></i>
-                <input type="text" id="set-ton-wallet" value="${tonWallet}" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3 pl-10 pr-3 text-sm text-white font-mono focus:border-green-500 focus:ring-1 focus:ring-green-500/50 outline-none transition-all shadow-inner" placeholder="EQ...">
-              </div>
-            </div>
-         </div>
-      </div>
-
-      <!-- System -->
-      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-orange-500/50 transition-all duration-300">
-         <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-orange-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-orange-500/20 transition-colors"></div>
-         <h2 class="text-sm font-bold text-white mb-4 flex items-center"><i class="fas fa-cogs text-orange-400 mr-2"></i>Система</h2>
-         
-         <div class="flex items-center justify-between p-4 bg-slate-900/80 rounded-2xl border border-slate-700 relative z-10">
-           <div>
-             <p class="font-bold text-white text-sm mb-0.5">Техническое обслуживание</p>
-             <p class="text-[10px] text-slate-500">Закрыть доступ для всех юзеров</p>
+      <!-- Referral System & Finances -->
+      <div class="flex flex-col gap-5">
+        <div class="glass-premium rounded-[2rem] p-6 relative overflow-hidden group hover:border-blue-500/40 transition-all duration-500">
+           <div class="absolute -left-10 -bottom-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-blue-500/20 transition-colors"></div>
+           <div class="flex items-center space-x-4 mb-6 relative z-10">
+             <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-xl text-blue-400 border border-blue-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-users"></i></div>
+             <h2 class="text-lg font-black text-white">Рефералы</h2>
            </div>
-           <label class="relative inline-flex items-center cursor-pointer tap-effect">
-             <input type="checkbox" id="set-maintenance" class="sr-only peer" ${settings.maintenanceMode ? 'checked' : ''}>
-             <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500 shadow-inner"></div>
-           </label>
-         </div>
+           
+           <div class="grid grid-cols-2 gap-4 relative z-10">
+              <div class="relative">
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Фикс. бонус</label>
+                <div class="relative flex items-center group-focus-within:text-blue-400">
+                  <i class="fas fa-gift absolute left-4 text-slate-500 transition-colors"></i>
+                  <input type="number" id="set-ref-fixed" value="${refFix}" step="0.01" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-3 text-sm font-bold text-white focus:border-blue-400 focus:shadow-[0_0_15px_rgba(59,130,246,0.2)] outline-none transition-all">
+                </div>
+              </div>
+              <div class="relative">
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Процент (%)</label>
+                <div class="relative flex items-center group-focus-within:text-blue-400">
+                  <i class="fas fa-percent absolute left-4 text-slate-500 transition-colors"></i>
+                  <input type="number" id="set-ref-bonus" value="${refPercent}" step="1" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-3 text-sm font-bold text-white focus:border-blue-400 focus:shadow-[0_0_15px_rgba(59,130,246,0.2)] outline-none transition-all">
+                </div>
+              </div>
+           </div>
+        </div>
+
+        <div class="glass-premium rounded-[2rem] p-6 relative overflow-hidden group hover:border-green-500/40 transition-all duration-500">
+           <div class="absolute -right-10 -top-10 w-40 h-40 bg-green-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-green-500/20 transition-colors"></div>
+           <div class="flex items-center space-x-4 mb-6 relative z-10">
+             <div class="w-12 h-12 rounded-2xl bg-green-500/10 flex items-center justify-center text-xl text-green-400 border border-green-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-wallet"></i></div>
+             <h2 class="text-lg font-black text-white">Финансы</h2>
+           </div>
+           
+           <div class="space-y-5 relative z-10">
+              <div class="relative">
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Мин. сумма вывода (USDT)</label>
+                <div class="relative flex items-center group-focus-within:text-green-400">
+                  <i class="fas fa-money-bill-wave absolute left-4 text-slate-500 transition-colors"></i>
+                  <input type="number" id="set-min-with" value="${settings.minWithdrawal}" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm font-bold text-white focus:border-green-500 focus:shadow-[0_0_15px_rgba(34,197,94,0.2)] outline-none transition-all">
+                </div>
+              </div>
+              <div class="relative">
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Кошелек TON (Tonkeeper)</label>
+                <div class="relative flex items-center group-focus-within:text-green-400">
+                  <i class="fas fa-link absolute left-4 text-slate-500 transition-colors"></i>
+                  <input type="text" id="set-ton-wallet" value="${tonWallet}" class="w-full bg-slate-900/80 border border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm font-mono font-bold text-white focus:border-green-500 focus:shadow-[0_0_15px_rgba(34,197,94,0.2)] outline-none transition-all" placeholder="EQ...">
+                </div>
+              </div>
+           </div>
+        </div>
       </div>
 
-      <button onclick="window.saveAdminSettings()" class="w-full py-4 bg-gradient-to-r from-teal-500 to-blue-500 hover:from-teal-400 hover:to-blue-400 text-white font-black text-sm rounded-2xl shadow-[0_10px_25px_rgba(20,184,166,0.3)] tap-effect border border-teal-400/50 uppercase tracking-wide group relative overflow-hidden">
+      <!-- Save Button -->
+      <button onclick="window.saveAdminSettings()" class="col-span-1 lg:col-span-2 py-4 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-900 font-black text-sm rounded-2xl shadow-[0_10px_25px_rgba(20,184,166,0.3)] tap-effect border border-teal-400/50 uppercase tracking-widest group relative overflow-hidden flex items-center justify-center animate-slide-up delay-150">
          <div class="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]"></div>
-         <span class="relative z-10 flex items-center justify-center"><i class="fas fa-save mr-2"></i>Сохранить изменения</span>
+         <i class="fas fa-save mr-2 text-lg"></i> Сохранить изменения
       </button>
 
       <!-- Promocodes -->
-      <div class="bg-slate-800/40 backdrop-blur-xl rounded-3xl p-5 border border-slate-700/50 shadow-xl relative overflow-hidden group hover:border-pink-500/50 transition-all duration-300">
-         <div class="absolute -right-10 -bottom-10 w-32 h-32 bg-pink-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-pink-500/20 transition-colors"></div>
+      <div class="col-span-1 lg:col-span-2 glass-premium rounded-[2rem] p-6 relative overflow-hidden group hover:border-pink-500/40 transition-all duration-500 animate-slide-up delay-200">
+         <div class="absolute -right-10 -bottom-10 w-40 h-40 bg-pink-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-pink-500/20 transition-colors"></div>
          
-         <div class="flex justify-between items-center mb-5 relative z-10">
-           <div>
-             <h2 class="text-sm font-bold text-white flex items-center"><i class="fas fa-ticket-alt text-pink-400 mr-2"></i>Промокоды</h2>
-             <p class="text-[10px] text-slate-400 mt-1">Раздача бонусов</p>
+         <div class="flex justify-between items-center mb-6 relative z-10">
+           <div class="flex items-center space-x-4">
+             <div class="w-12 h-12 rounded-2xl bg-pink-500/10 flex items-center justify-center text-xl text-pink-400 border border-pink-500/20 shadow-inner group-hover:scale-110 transition-transform"><i class="fas fa-ticket-alt"></i></div>
+             <div>
+               <h2 class="text-lg font-black text-white">Промокоды</h2>
+               <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Раздача бонусов</p>
+             </div>
            </div>
-           <button onclick="window.openPromoModal()" class="bg-pink-500/20 text-pink-400 border border-pink-500/30 px-3 py-2 rounded-xl font-bold text-[11px] hover:bg-pink-500 hover:text-white transition-all shadow-lg tap-effect flex items-center">
+           <button onclick="window.openPromoModal()" class="bg-pink-500 text-white px-4 py-2.5 rounded-xl font-bold text-xs hover:bg-pink-400 transition-all shadow-[0_5px_15px_rgba(236,72,153,0.3)] tap-effect flex items-center uppercase tracking-widest">
              <i class="fas fa-plus mr-1.5"></i>Создать
            </button>
          </div>
 
-         <div class="space-y-3 relative z-10">
-           ${(!state.admin.promoCodes || state.admin.promoCodes.length === 0) ? '<div class="text-[11px] text-slate-500 bg-slate-900/80 p-5 rounded-2xl border border-slate-700/50 text-center border-dashed font-medium">Нет активных промокодов</div>' : ''}
+         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
+           ${(!state.admin.promoCodes || state.admin.promoCodes.length === 0) ? '<div class="col-span-full py-8 text-center glass-premium border border-slate-700 border-dashed rounded-2xl text-slate-500 text-sm font-medium">Нет активных промокодов</div>' : ''}
            ${(state.admin.promoCodes || []).map(p => `
-             <div class="bg-slate-900/80 p-3.5 rounded-2xl border border-slate-700/50 flex justify-between items-center hover:border-pink-500/40 transition-colors shadow-sm">
-               <div class="flex items-center space-x-3.5">
-                 <div class="w-10 h-10 rounded-xl bg-pink-500/10 flex items-center justify-center text-pink-400 border border-pink-500/20 shadow-inner">
+             <div class="bg-slate-900/80 p-4 rounded-2xl border border-slate-700 flex justify-between items-center hover:border-pink-500/50 transition-colors shadow-sm group/promo">
+               <div class="flex items-center space-x-4">
+                 <div class="w-12 h-12 rounded-xl bg-pink-500/10 flex items-center justify-center text-lg text-pink-400 border border-pink-500/20 shadow-inner group-hover/promo:scale-110 transition-transform">
                    <i class="fas fa-gift"></i>
                  </div>
                  <div>
-                   <p class="font-bold text-white text-sm font-mono tracking-wider">${p.code}</p>
-                   <p class="text-[9px] text-slate-400 mt-1">Награда: <span class="text-teal-400 font-bold">${p.reward} USDT</span> <span class="mx-1 opacity-50">•</span> Выдано: <span class="text-white">${p.currentUses}/${p.maxUses || '∞'}</span></p>
+                   <p class="font-black text-white text-base font-mono tracking-widest drop-shadow-sm mb-0.5">${p.code}</p>
+                   <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Награда: <span class="text-teal-400 ml-0.5">+${p.reward} USDT</span> <span class="mx-1 opacity-50">•</span> <span class="text-white">${p.currentUses}/${p.maxUses || '∞'}</span></p>
                  </div>
                </div>
-               <button onclick="window.deletePromo('${p.code}')" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-500 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 border border-transparent flex items-center justify-center transition-all tap-effect shrink-0">
-                 <i class="fas fa-trash text-xs"></i>
+               <button onclick="window.deletePromo('${p.code}')" class="w-10 h-10 rounded-xl bg-slate-800 text-slate-500 hover:bg-red-500/20 hover:text-red-400 border border-transparent hover:border-red-500/30 flex items-center justify-center transition-all tap-effect shrink-0 shadow-inner">
+                 <i class="fas fa-trash text-sm"></i>
                </button>
              </div>
            `).join('')}
@@ -2657,13 +2903,37 @@ function renderAdminSettings() {
       </div>
 
       <!-- Danger Zone -->
-      <div class="bg-red-900/10 backdrop-blur-xl rounded-3xl p-5 border border-red-500/20 shadow-xl relative overflow-hidden group hover:border-red-500/40 transition-all duration-300">
-         <div class="absolute -left-10 -bottom-10 w-32 h-32 bg-red-500/10 rounded-full blur-3xl pointer-events-none"></div>
-         <h2 class="text-sm font-bold text-red-500 mb-4 flex items-center relative z-10"><i class="fas fa-exclamation-triangle mr-2"></i>Опасная зона</h2>
+      <div class="col-span-1 lg:col-span-2 glass-premium border border-red-500/30 rounded-[2rem] p-6 relative overflow-hidden group hover:border-red-500/50 transition-all duration-500 animate-slide-up delay-300 mb-8">
+         <div class="absolute -left-10 -bottom-10 w-40 h-40 bg-red-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-red-500/20 transition-colors"></div>
          
-         <button onclick="window.resetTotalPaid()" class="w-full relative z-10 py-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 font-bold text-xs rounded-xl transition-all tap-effect shadow-sm flex items-center justify-center">
-           <i class="fas fa-skull mr-2"></i>Обнулить статистику "Выплачено"
-         </button>
+         <div class="flex items-center space-x-4 mb-6 relative z-10">
+           <div class="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center text-xl text-red-500 border border-red-500/20 shadow-inner group-hover:scale-110 group-hover:rotate-12 transition-transform"><i class="fas fa-exclamation-triangle"></i></div>
+           <div>
+             <h2 class="text-lg font-black text-red-500">Опасная зона</h2>
+             <p class="text-[10px] text-red-400/70 font-bold uppercase tracking-widest">Необратимые действия</p>
+           </div>
+         </div>
+         
+         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
+             <div class="flex items-center justify-between p-4 bg-slate-900/80 rounded-2xl border border-orange-500/30 hover:border-orange-500/50 transition-colors">
+               <div>
+                 <p class="font-bold text-white text-sm mb-0.5 flex items-center"><i class="fas fa-wrench text-orange-400 mr-2"></i>Техобслуживание</p>
+                 <p class="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Блок входа для всех</p>
+               </div>
+               <label class="relative inline-flex items-center cursor-pointer tap-effect shadow-inner">
+                 <input type="checkbox" id="set-maintenance" class="sr-only peer" ${settings.maintenanceMode ? 'checked' : ''}>
+                 <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500 peer-checked:after:bg-white border border-slate-700"></div>
+               </label>
+             </div>
+
+             <button onclick="window.resetTotalPaid()" class="w-full p-4 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 font-black text-xs rounded-2xl transition-all tap-effect shadow-sm flex items-center justify-center uppercase tracking-widest">
+               <i class="fas fa-history mr-2 text-lg"></i> Обнулить стату "Выплачено"
+             </button>
+             
+             <button id="reset-db-btn" onclick="window.resetDatabase()" class="w-full md:col-span-2 p-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 font-black text-xs rounded-2xl transition-all tap-effect shadow-sm flex items-center justify-center uppercase tracking-widest">
+               <i class="fas fa-bomb mr-2 text-lg"></i> Полный сброс БД (Удалить всё)
+             </button>
+         </div>
       </div>
       
     </div>
@@ -2690,6 +2960,30 @@ window.resetTotalPaid = async () => {
   await syncAdminData();
   
   showToast("Статистика выплат успешно обнулена");
+};
+
+window.resetDatabase = async () => {
+  if (!confirm("ВНИМАНИЕ! Вы уверены, что хотите ПОЛНОСТЬЮ ОБНУЛИТЬ БАЗУ ДАННЫХ? Все пользователи, балансы, рефералы и настройки будут удалены безвозвратно.")) return;
+  if (!confirm("ЭТО ДЕЙСТВИЕ НЕОБРАТИМО! Вы точно хотите удалить всё?")) return;
+
+  const btn = document.getElementById('reset-db-btn');
+  if (btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Удаление...';
+
+  try {
+      const allDocs = await User.find({});
+      for (let doc of allDocs) {
+          await User.deleteOne({ id: doc.id });
+      }
+      localStorage.clear();
+      showToast("База данных успешно обнулена! Перезагрузка...");
+      setTimeout(() => {
+          window.location.reload();
+      }, 2000);
+  } catch(e) {
+      console.error(e);
+      showToast("Ошибка при обнулении БД");
+      if (btn) btn.innerHTML = '<i class="fas fa-bomb mr-2"></i>Полный сброс БД (Удалить всё)';
+  }
 };
 
 window.openPromoModal = () => {
@@ -2829,6 +3123,80 @@ window.openLeaderboardModal = async () => {
     modalContent.innerHTML = '<div class="p-4 text-center text-red-400 text-xs">Ошибка загрузки данных</div><button onclick="window.closeModal()" class="w-full py-2.5 mt-4 bg-slate-800 text-white rounded-xl font-bold text-xs">Закрыть</button>';
   }
 };
+
+// ==========================================
+// ANIMATIONS
+// ==========================================
+function startHomeParticles() {
+  const layer = document.getElementById('particles-layer');
+  if (!layer) return;
+  layer.innerHTML = '';
+  for (let i = 0; i < 20; i++) {
+    createParticle(layer);
+  }
+}
+
+function createParticle(layer) {
+  if (!layer || document.getElementById('particles-layer') !== layer) return;
+  const p = document.createElement('div');
+  const size = Math.random() * 4 + 2;
+  const isCoin = Math.random() > 0.85;
+  
+  p.className = 'particle';
+  if (isCoin) {
+     p.innerHTML = '<i class="fas fa-coins text-teal-500/30"></i>';
+     p.style.fontSize = `${size * 3}px`;
+  } else {
+     p.style.width = `${size}px`;
+     p.style.height = `${size}px`;
+     p.style.backgroundColor = Math.random() > 0.5 ? 'rgba(45,212,191,0.5)' : 'rgba(168,85,247,0.5)';
+     p.style.borderRadius = '50%';
+     p.style.boxShadow = `0 0 ${size*2}px currentColor`;
+  }
+  
+  p.style.left = `${Math.random() * 100}%`;
+  p.style.bottom = '-20px';
+  const duration = Math.random() * 5 + 4;
+  p.style.animationDuration = `${duration}s`;
+  p.style.animationDelay = `${Math.random() * 5}s`;
+  
+  layer.appendChild(p);
+  setTimeout(() => {
+    if (p.parentNode === layer && currentTab === 'home') {
+      p.remove();
+      createParticle(layer);
+    } else if (p.parentNode) {
+      p.remove();
+    }
+  }, (duration + 5) * 1000);
+}
+
+function spawnCoins(x, y, targetEl) {
+  let targetRect = { left: window.innerWidth / 2, top: 50, width: 0, height: 0 };
+  if (targetEl) targetRect = targetEl.getBoundingClientRect();
+  
+  const targetX = targetRect.left + targetRect.width / 2;
+  const targetY = targetRect.top + targetRect.height / 2;
+  
+  for (let i = 0; i < 12; i++) {
+    const coin = document.createElement('div');
+    coin.className = 'coin-anim flex items-center justify-center';
+    coin.innerHTML = '<i class="fas fa-coins text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]"></i>';
+    coin.style.left = `${x - 12}px`;
+    coin.style.top = `${y - 12}px`;
+    
+    // Calculate random target position near the balance
+    const randomTx = (targetX - x) + (Math.random() - 0.5) * 40;
+    const randomTy = (targetY - y) + (Math.random() - 0.5) * 40;
+    
+    coin.style.setProperty('--tx', `${randomTx}px`);
+    coin.style.setProperty('--ty', `${randomTy}px`);
+    coin.style.animationDelay = `${Math.random() * 0.1}s`;
+    
+    document.body.appendChild(coin);
+    setTimeout(() => coin.remove(), 1000);
+  }
+}
 
 // Start app
 document.addEventListener('DOMContentLoaded', initApp);
